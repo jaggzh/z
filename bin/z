@@ -495,7 +495,7 @@ if (!defined $modelspec) {
 	se "Server model ($server_modelname) not found in config ($fn_config)";
 	exit;
 }
-sel 1, "Model match in config: $$modelspec{shortname}";
+sel 1, "Model match in config: " . ($$modelspec{shortname} // "undef");
 my $model_insttype = $modelspec->{insttype};
 sel 1, "  Model instruct type: $model_insttype";
 

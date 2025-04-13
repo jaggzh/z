@@ -196,7 +196,7 @@ No hidden Python. No megabytes of dependency hell. Just you, a prompt, and raw m
 Clone it:
 
 ```bash
-git clone https://github.com/jaggz.h/z
+git clone https://github.com/jaggzh/z
 cd z-llm
 ```
 

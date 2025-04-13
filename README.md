@@ -20,10 +20,10 @@ This CLI is built to feel **instant**, even when calling local models 1000 times
 
 ## Why at all?
 
-- ✅ Convenient use of local models (I use llama.cpp's `llama-server`)
-- ✅ Extremely convenient CLI
-- ✅ Extremely convenient to throw in your shell scripts
-- ✅ Dynamically adapts to whichever LLM you're running
+- Convenient use of local models (I use llama.cpp's `llama-server`)
+- Extremely convenient CLI
+- Extremely convenient to throw in your shell scripts
+- Dynamically adapts to whichever LLM you're running
 
 ---
 

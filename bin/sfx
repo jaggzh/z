@@ -1,0 +1,50 @@
+#!/usr/bin/perl
+use v5.36;
+
+my $opt_newlines=2;
+my $opt_procopts=1;
+my @args;
+
+for my $a (@ARGV) {
+	if ($opt_procopts) {
+		if ($a eq '-h') {
+			usage(); exit;
+		} elsif ($a eq '-N' || $a eq '--no-newlines') {
+			$opt_newlines = 0;
+		} elsif ($a eq '-n' || $a eq '--one-newline') {
+			$opt_newlines = 1;
+		} elsif ($a eq '--') {
+			$opt_procopts = 0;
+		} else {
+			push @args, $a;
+		}
+	} else {
+		push @args, $a;
+	}
+}
+
+@args = map {
+	my $a=$_;
+	$a =~ s/\\r\\n/\n/g;
+	$a =~ s/\\n/\n/g;
+	$a;
+} @args;
+
+my $doc = do { local $/; <STDIN> };
+$doc =~ s/\s+$//s;
+print $doc;
+
+print "\n" x $opt_newlines;
+print join(' ', @args);
+print "\n";
+
+sub usage {
+	print <<~'EOT'
+		pfx [opts] strs [opts]
+		Options:
+		  -h / --help
+		  -N / --no-newlines  We output a double newline by default.
+		  -n / --one-newline  We output a double newline by default.
+		  --                  no more option processing after this
+		EOT
+}

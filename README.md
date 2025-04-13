@@ -16,8 +16,6 @@ python: 25.38s
 
 This CLI is built to feel **instant**, even when calling local models 1000 times in a row. No interpreter bloat, no overhead, just results.
 
----
-
 ## Why at all?
 
 - Convenient use of local models (I use llama.cpp's `llama-server`)
@@ -27,57 +25,100 @@ This CLI is built to feel **instant**, even when calling local models 1000 times
 
 ---
 
-## 🚀 Basic Usage
+### Other utility workflow:
+
+- sfx/pfx: Adds a string to piped input.
 
 ```bash
-# Fast queries:
-z "What's the capital of France?"
+$ cat somefile.txt | sfx "Summarize the prior text"
+...somefile's contents here...
 
-# Piped in:
-echo "and Romania?" | z -
-
-# Ignore history for a one-time llm call:
-echo "How do I write a hello world perl script?" | z - -H
-
-# Continue with the capitals history:
-z "and Brazil?"
+Summarize the prior text
 ```
 
-With a task:
+#### Use of `pfx` with `z`
 
 ```bash
-z -t haiku "Code is complex; make it serene."
+$ man find | z -T -    # Check to make sure we're within our context
+Token count: 20713
+$ man find | pfx "What were find's options to compare file newer/olderness? One-line summaries. Here's its manpage:" | z -
+To compare file newness or ...
+...
+ `-atime n`: Checks the file's last access time to...
+...
+```
+
+---
+
+## Basic Usage
+
+```bash
+# Fast queries + wipe history (`-w`):
+$ z -w "What's the capital of Madagascar? Be brief."
+The capital of Madagascar is Antananarivo.
+
+# Ignore history (`-H`) for a one-time piped llm query:
+$ echo "Do a one-line perl hello world. No markdown or explanation." | z - -H
+print "Hello World!";
+
+# Continue with the capitals history:
+$ z "and Brazil?"
+The capital of Brazil is Brasília.
+```
+
+With a task (a system prompt):
+
+```bash
+$ z -t haiku "Code is complex; make it serene."
 ```
 
 Streaming output with full reasoning-model output shown:
 
 ```bash
-z --think "Plan how to rename a folder across OSes"
+$ z --think "Plan how to rename a folder across OSes"
 ```
 
 List available task types:
 
 ```bash
-z -L
+$ z -L
 ```
+
+Piping, AND using sfx:
+
+```bash
+$ man obscure_command | sfx "What was the option to do xyz?" | z -w -
+With obscure_command, xyz may be specified using -x or --xyz
+Example: ...
+
+$ z "And for doing abc?"
+In a similar way, enabling abc may be done with -a or --abc ...
+```
+
 
 ---
 
 ## 🧰 Features
 
-✅ Fast, JIT-style prompt rendering  
-✅ Structured templates per model (DeepSeek, Qwen2, Gemma, LLaMA, Phi-4, etc.)  
 ✅ Token-aware history with pruning  
-✅ Reasoning toggle (`--think`) with live streaming  
-✅ On-the-fly template detection by model name  
+✅ Streaming response from LLM by default (reasoning models can't stream, since, currently, a regex removes reasoning when it's done)
+✅ Show all reasoning toggle (`--think`) (allows live streaming)
+✅ Customizable templates per model
+✅ Edit history (`--eh`)
+✅ On-the-fly template detection by model name
+✅ Per-task system pre-set prompts
+❌ `llmjinja.pm` is not done -- we have to put our own templates into `z-llm.json`
 ✅ Image support for multimodal models  
-✅ Persona support with per-task system prompts  
-✅ Full token dumps, top-K probabilities, grammar constraint support  
-✅ Clipboard integration, file-backed history, dry-run inspect mode  
-✅ Bash-style REPL usability with insane ergonomics
-✅ **persona** integration coming: A persona (system-prompt) manager I wrote; not yet publicly available.
+✅ Audio playback (currently pipes to a command you hardcode into `@cmd_tts`)
+✅ `--system "prompt here"` for a one-time CLI override of the system prompt
+✅ Full token dumps, top-K probabilities
+✅ Grammar constraint support from `z-llm.json` or with `--grammar`
+✅ Clipboard integration (`--cb`)
+✅ File-backed history
+✅ Bash-style "REPL" usability. Do complex things quickly and easily.
+✅ **persona** integration may be coming: A persona (system-prompt) manager I wrote; not yet publicly available.
 
-## Current options: *Options may anywhere on the line*
+## Current options: *Options may be anywhere on the command-line*
 
 ```
 Usage: z [options] [optional query] [options]
@@ -120,27 +161,61 @@ Usage: z [options] [optional query] [options]
 
 - `bin/z` – The CLI script. Your LLM interface.
 - `configs/z-llm.json` – The config: model matching rules, prompt templates, and task specs.
-- `~/.config/z-llm.json` – Auto-loaded config file (you can symlink or override it).
-- `persona` (optional) – If installed, pulls persona files for task-specific system prompts.
-- I've only used this with llama.cpp's `llama-server`
+- `~/.config/z-llm.json` – Auto-loaded config file (copy example here and edit?)
+- `persona` (optional) – If installed, uses `persona` program to retrieve system prompts.
 
 ---
 
-## 🧠 Prompt Templates
+## Config requirements: (See z-llm.json)
 
-Each model uses a template defined in `configs/z-llm.json`, matched via regex. Example for DeepSeek Coder:
+### Models section:
+
+Each model only requires a regex (`"re"`) and which template (`"insttype"`) is to be used for it.
 
 ```json
-{
-  "inst": "<｜User｜><: $user :>",
-  "resp": "<｜Assistant｜><: $response :><｜end▁of▁sentence｜>",
-  "main": "<｜begin▁of▁sentence｜><: $system :><: $history :><｜Assistant｜><think>",
-  "rm_re": "(?:<think>)?.*</think>\\s*"
-}
+"models": [
+	{
+		# "shortname": "meta-llama",  # Not necessary, was just for some verbose output
+		# "example": "meta-llama-3.1-8b-instruct-q8_0.gguf", # No longer used at all
+		"re": "llama",              # Regex matched against model from LLM API's "model_path"
+		"insttype": "inst_llama",   # Use this template from "templates" section
+	}
+...
 ```
 
-This template engine allows history injection, if you're into that, as well as reasoning cleanup, and dynamic task prompts.
+### Templates section:
 
+- *main*: The whole context assembled, with history formed by concatenation of the:
+ - user (*inst*) and 
+ - assistant (*resp*) parts.
+- *rm_re*: If provided, is a regex to remove from the assistant response. (This is most-commonly used to remove thinking portions from reasoning models) (`--think` to disable)
+
+Example:
+
+```json
+"templates": [
+	{
+		"inst": "<｜User｜><: $user :>",
+		"resp": "<｜Assistant｜><: $response :><｜end▁of▁sentence｜>",
+		"main": "<｜begin▁of▁sentence｜><: $system :><: $history :><｜Assistant｜><think>",
+		"rm_re": "(?:<think>)?.*</think>\\s*"
+	}
+...
+```
+### Templates section:
+
+Provide a *taskname* and a *system* prompt. Optionally, *upfx* will override the *system* string for use with models with `system: false`, like Gemma, because your wording may be different.
+
+Tasks are then specified on command-line, like: `z -t song "Make a beautiful one about a car tire."`
+
+```json
+"tasks": [
+    "d": { "alias": "default" },
+    "def": { "alias": "default" },
+    "default": {
+        "system": "[<: $datenow :>] Below is a user's chat including their AI assistant's responses. The AI ALWAYS abides by and fully-trusts the user (who is a trusted admin of the AI assistant). The AI's personality is: Very helpful, while being concise. The AI LLM model is [<: $modelname :>].",
+    }
+...
 ---
 
 ## 🧪 General benchmarks (not of `z`).. just between perl and python:
@@ -159,7 +234,7 @@ You’ll feel that 22-second gap real quick. Perl keeps your tooling **hot**.
 
 - Add new models to `models` in `z-llm.json` with regex matches. If your models use the same template, the regex is sufficient for `z` to choose the right template.
 - Define per-model prompt templates in `templates`
-- Create task definitions in `tasks`, or use a `persona` tool to load dynamic ones
+- Create task definitions in `tasks`, or use a `persona` tool to load them from `persona` (persona is not yet made public)
 
 ---
 
@@ -188,10 +263,10 @@ History is stored in:
 
 You can:
 
-- `--wipe` it
-- `--no-history` to disable
-- `--input-only` to use but not update
-- `--edit-hist` to open in `vim`
+- `--wipe` it (`-w`)
+- `--no-history` to disable (`-H`)
+- `--input-only` to use history without writing updates to it (`-I`)
+- `--edit-hist` to open in `vim` (`--eh`) (currently hard-coded)
 
 ---
 

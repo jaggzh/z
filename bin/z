@@ -44,6 +44,7 @@ binmode *STDOUT, "utf8";
 binmode *STDERR, "utf8";
 
 my $bin_persona = 'persona'; # If you have persona manager installed
+my @cmd_tts=("voice-piper-interactive"); # Your tts wrapper taking from STDIN
 my $stg_trim_history = 0;
 my $def_npredict = 8192;
 my $user=`whoami`; chomp $user;
@@ -77,7 +78,7 @@ my @specs = (
 	Switch("--help|-h")->doc("This beautiful help"),
 	Counter("--verbose|-v")->default(0)->doc("Increase verbosity"),
 	Counter("--verbose_resp|--vr")->doc("Verbose response data"),
-	Switch("--dry_run|-n")->doc("Dry run"),
+	Switch("--dry_run|-n")->doc("Dry run (no longer available)"),
     List("--image|--img")->doc("Provide images (in prompt, use [img] or, for multiple, use [img-1] .. [img-N])"),
     Switch("--clipboard|--cb")->doc("Use clipboard content"),
 	Switch("--interactive|--int|-i")->doc("Interactive"),
@@ -683,23 +684,29 @@ if (defined $opt_system) {
 	};
 }
 
+# Switch("--play_user|--pu")->doc("Play user text"),
+# Switch("--play_resp|--pr")->doc("Play response text"),
+if ($opts->get_play_user) {
+	tts_str($uprompt);
+}
 my $assistant_response = complete_with_mojo(
 	tplspec=>$tplspec,
 	taskspec=>$taskspec,
 	modelspec=>$modelspec,
 	uprompt=>$uprompt,
 	args=>$opts);
-# Switch("--play_user|--pu")->doc("Play user text"),
-# Switch("--play_resp|--pr")->doc("Play response text"),
 if ($opts->get_play_resp) {
-	my @incmd = ('printf', '%s', $assistant_response);
-	my @cmd = ('vpi');
-	my $incmd = shell_quote(@incmd);
-	my $cmd = shell_quote(@cmd);
-	system("$incmd | $cmd");
+	tts_str($assistant_response);
 }
 say '';
 exit;
+
+sub tts_str {
+	my $str = shift;
+	open(my $ttsf, "|-", @cmd_tts) || die "Couldn't execute tts bin: $cmd_tts[0]: $!";
+	print $ttsf $str;
+	close $ttsf;
+}
 
 sub format_prompt {
 	my %opts = @_;

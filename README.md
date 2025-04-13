@@ -1,4 +1,4 @@
-# 🧠 `z` – A Fast, Flexible, Perl-Powered CLI for Local LLMs
+# `z` – A Fast, Flexible, Perl-Powered CLI for Local LLMs
 
 Forget Python bloat. `z` is a lightweight, blazing-fast CLI wrapper for interacting with LLMs over a local `llama.cpp` HTTP server. Built in Perl for speed, sanity, and simplicity — with features that rival most Python agent toolkits.
 
@@ -16,30 +16,12 @@ python: 25.38s
 
 This CLI is built to feel **instant**, even when calling local models 1000 times in a row. No interpreter bloat, no overhead, just results.
 
----
+## Why at all?
 
-## 🧰 Features
-
-✅ Fast, JIT-style prompt rendering  
-✅ Structured templates per model (DeepSeek, Qwen2, Gemma, LLaMA, Phi-4, etc.)  
-✅ Token-aware history with pruning  
-✅ Reasoning toggle (`--think`) with live streaming  
-✅ On-the-fly template detection by model name  
-✅ Image support for multimodal models  
-✅ Persona support with per-task system prompts  
-✅ Full token dumps, top-K probabilities, grammar constraint support  
-✅ Clipboard integration, file-backed history, dry-run inspect mode  
-✅ Bash-style REPL usability with insane ergonomics
-
----
-
-## 📦 Files
-
-- `bin/z` – The CLI script. Your LLM interface.
-- `configs/z-llm.json` – The config: model matching rules, prompt templates, and task specs.
-- `~/.config/z-llm.json` – Auto-loaded config file (you can symlink or override it).
-- `persona` (optional) – If installed, pulls persona files for task-specific system prompts.
-- I've only used this with llama.cpp's `llama-server`
+✅ Convenient use of local models (I use llama.cpp's `llama-server`)
+✅ Extremely convenient CLI
+✅ Extremely convenient to throw in your shell scripts
+✅ Dynamically adapts to whichever LLM you're running
 
 ---
 
@@ -76,6 +58,68 @@ List available task types:
 ```bash
 z -L
 ```
+
+---
+
+## 🧰 Features
+
+✅ Fast, JIT-style prompt rendering  
+✅ Structured templates per model (DeepSeek, Qwen2, Gemma, LLaMA, Phi-4, etc.)  
+✅ Token-aware history with pruning  
+✅ Reasoning toggle (`--think`) with live streaming  
+✅ On-the-fly template detection by model name  
+✅ Image support for multimodal models  
+✅ Persona support with per-task system prompts  
+✅ Full token dumps, top-K probabilities, grammar constraint support  
+✅ Clipboard integration, file-backed history, dry-run inspect mode  
+✅ Bash-style REPL usability with insane ergonomics
+
+## Current options: *Options may anywhere on the line*
+
+```
+Usage: z [options] [optional query] [options]
+	--[cb|clipboard]         Use clipboard content
+	--ctx                    Get running model n_ctx (query not used)
+	-d, --def                Set default (probably general-purpose) task name (TEMPORARY) (short for -t default).
+	-D, --default-all        CLEAR (default AND STORE) taskname AND suffix (like -t default --sfx '' -S)
+	-n, --dry_run            Dry run
+	-E, --[eh|edit-hist]     Edit history (will choose the current suffix)
+	-g, --grammar            Force a grammar
+	-h, --help               This beautiful help
+	--[hin|history-input-file] File for INPUT-only history (not modified)
+	--[img|image]            Provide images (in prompt, use [img] or, for multiple, use [img-1] .. [img-N])
+	-I, --input-only         Use history BUT DO NOT WRITE TO IT.
+	-i, --[int|interactive]  Interactive
+	-L, --list-tasktypes     List available tasktype names
+	--metadata               Get running model metadata info
+	-P, --n_predict          Limit prediction length to N tokens (default: 8192)
+	-u, --no-cache           Disable cache (ignore. unused)
+	-H, --no-history         Do not use history. No load, no store.
+	-C, --no_color           Disable color (used in interactive mode)
+	--[pr|play_resp]         Play response text
+	--[pu|play_user]         Play user text
+	--probs                  Return probabilities for top N tokens (default: disabled (0))
+	-r, --raw                Don't do any processing (so tokens might come out live)
+	-s, --[sfx|storage-sfx]  Make the history unique
+	-S, --store              Store any given -t/--tasktype or -s/--sfx. Note that sfx is stored globally for this user.
+	--system                 Set a system prompt (overrides -t)
+	-t, --tasktype           Use this task name (default: default)
+	--[think|thought]        Do not removing reasoning sections in reasoning models
+	-T, --token_count        Count tokens in the input text
+	--tokens_full            Output full tokens with parts
+	-v, --verbose            Increase verbosity (default: 0)
+	--[vr|verbose_resp]      Verbose response data
+	-w, --wipe               Wipe prompt history
+
+---
+
+## 📦 Files
+
+- `bin/z` – The CLI script. Your LLM interface.
+- `configs/z-llm.json` – The config: model matching rules, prompt templates, and task specs.
+- `~/.config/z-llm.json` – Auto-loaded config file (you can symlink or override it).
+- `persona` (optional) – If installed, pulls persona files for task-specific system prompts.
+- I've only used this with llama.cpp's `llama-server`
 
 ---
 

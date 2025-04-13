@@ -75,6 +75,7 @@ z -L
 ✅ Full token dumps, top-K probabilities, grammar constraint support  
 ✅ Clipboard integration, file-backed history, dry-run inspect mode  
 ✅ Bash-style REPL usability with insane ergonomics
+✅ **persona** integration coming: A persona (system-prompt) manager I wrote; not yet publicly available.
 
 ## Current options: *Options may anywhere on the line*
 

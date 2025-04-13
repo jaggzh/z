@@ -16,6 +16,8 @@ python: 25.38s
 
 This CLI is built to feel **instant**, even when calling local models 1000 times in a row. No interpreter bloat, no overhead, just results.
 
+---
+
 ## Why at all?
 
 ✅ Convenient use of local models (I use llama.cpp's `llama-server`)

@@ -1,0 +1,1093 @@
+#!/usr/bin/perl
+#!/usr/bin/perl -d
+
+use v5.34;
+use warnings;
+use bansi;	# Include for term colors (Like $bred, $bgblu, $yel, $bro, ..., $rst to reset.
+use Getopt::Lucid qw(:all);
+use POSIX qw(strftime);
+use Text::Xslate;
+use LWP::UserAgent;
+use JSON::XS;
+use File::Glob ':glob';
+use URI::Escape;
+use Data::Dumper;
+use Mojo::UserAgent;
+use List::Util qw(max);
+use Clipboard;
+use MIME::Base64;  # For encoding images to Base64
+use Image::Magick;
+use File::Slurper qw(write_text read_text read_lines read_binary);
+use File::Basename;
+use Encode qw(encode_utf8 decode);
+use String::ShellQuote;
+use File::Copy;
+use File::Temp qw(tempfile);
+use File::Compare;
+use Carp 'confess';
+$SIG{__DIE__} = sub { confess @_ };
+
+# no autovivification;
+# use autobox::Core;
+
+# use JSON::MaybeXS;
+use HTTP::Request;
+
+# no strict 'subs';
+
+# Predeclare for use without parenthesis:
+sub se; sub sel; sub sewarn; sub pe; sub pel;
+
+$|=1;
+binmode *STDIN, "raw"; # use decode, later, so we can set to ignore bad sequences
+binmode *STDOUT, "utf8";
+binmode *STDERR, "utf8";
+
+my $bin_persona = 'persona'; # If you have persona manager installed
+my $stg_trim_history = 0;
+my $def_npredict = 8192;
+my $user=`whoami`; chomp $user;
+my $def_tasktype = 'default';
+my $def_sfx = '';
+my $apiurlbase = $ENV{LLM_API_URL} // 'http://127.0.0.1:8080';
+my $ctx = 8192;
+my $HISTFILE = "/tmp/llamachat_history-$user%s.json";
+my $TASKTYPE_FN_FMT = "/tmp/llamachat_tasktype-$user%s.json";
+my $SFX_FN = "/tmp/llamachat_sfx-$user.json";
+my $HISTLEN_LINES = -1; # 50;	# lines (back and forth pairs)
+# HISTLEN_TOKENS will be overridden later by n_ctx from model props
+my $HISTLEN_TOKENS = int($ctx*.7)-38; # 70%? - space for system prompt??
+my $verbose = 0;
+my $verbose_resp = 0;
+my $outfn_au_user = "/tmp/zchat-$user-user.wav";
+my $outfn_au_resp = "/tmp/zchat-$user-resp.wav";
+my $clr_r_pfx='';
+my $clr_r_sfx='';
+my $sysarg;
+my $query;
+my $cacheprompt=JSON::XS::true;
+$cacheprompt=JSON::XS::false;
+my $jsonfalse = JSON::XS::false;
+my $jsontrue = JSON::XS::true;
+my $clr_notice_bg=a24bg(30,155,30);
+my $clr_notice_fg=$whi;
+my $oumask = 0077; # This should be overwritten when we set umask later
+
+my @specs = (
+	Switch("--help|-h")->doc("This beautiful help"),
+	Counter("--verbose|-v")->default(0)->doc("Increase verbosity"),
+	Counter("--verbose_resp|--vr")->doc("Verbose response data"),
+	Switch("--dry_run|-n")->doc("Dry run"),
+    List("--image|--img")->doc("Provide images (in prompt, use [img] or, for multiple, use [img-1] .. [img-N])"),
+    Switch("--clipboard|--cb")->doc("Use clipboard content"),
+	Switch("--interactive|--int|-i")->doc("Interactive"),
+	Switch("--raw|-r")->doc("Don't do any processing (so tokens might come out live)"),
+	Switch("--token_count|-T")->doc("Count tokens in the input text"),
+	Switch("--ctx")->doc("Get running model n_ctx (query not used)"),
+	Switch("--metadata")->doc("Get running model metadata info"),
+	Switch("--tokens_full")->doc("Output full tokens with parts"),
+	Param("--n_predict|-P")->default($def_npredict)->doc("Limit prediction length to N tokens"),
+	Switch("--play_user|--pu")->doc("Play user text"),
+	Switch("--play_resp|--pr")->doc("Play response text"),
+	Param("--probs")->doc("Return probabilities for top N tokens (default: disabled (0))"),
+	Switch("--no_color|-C")->doc("Disable color (used in interactive mode)"),
+	Switch("--no-cache|-u")->doc("Disable cache (ignore. unused)"),
+	Switch("--wipe|-w")->doc("Wipe prompt history"),
+	Switch("--no-history|-H")->doc("Do not use history. No load, no store."),
+	Switch("--input-only|-I")->doc("Use history BUT DO NOT WRITE TO IT."),
+	Switch("--edit-hist|--eh|-E")->doc("Edit history (will choose the current suffix)"),
+	Param("--history-input-file|--hin")->doc("File for INPUT-only history (not modified)"),
+	Param("--grammar|-g")->doc("Force a grammar"),
+	Param("--tasktype|-t")->doc("Use this task name (default: $def_tasktype)"),
+	Param("--storage-sfx|--sfx|-s")->doc("Make the history unique"),
+	Switch("--store|-S")->doc("Store any given -t/--tasktype or -s/--sfx. Note that sfx is stored globally for this user."),
+	Switch("--def|-d")->doc("Set default (probably general-purpose) task name (TEMPORARY) (short for -t $def_tasktype)."),
+	Switch("--default-all|-D")->doc("CLEAR (default AND STORE) taskname AND suffix (like -t $def_tasktype --sfx '' -S)"),
+	Param("--system")->doc("Set a system prompt (overrides -t)"),
+	Switch("--list-tasktypes|-L")->doc("List available tasktype names"),
+	Switch("--thought|--think")->doc("Do not removing reasoning sections in reasoning models"),
+);
+
+# my $opts = Getopt::Lucid->getopt(\@specs, { strict=>1 });
+@ARGV = map { decode('UTF-8', $_) } @ARGV;
+my $opts = Getopt::Lucid->new( \@specs, { strict=>1 });
+$opts->getopt();
+if ($opts->get_help) { usage(); }
+my $input_only = $opts->get_input_only;
+
+$verbose = $opts->get_verbose;
+$verbose_resp = $opts->get_verbose_resp;
+
+my $tasktype;
+my $storage_sfx;
+my @no_query_ok_msgs;
+
+## STORED STUFF: TWO USER-REQUESTED STORAGE ROUTES:
+##  -D (default all)
+##  -S (store whichever are specified on commandline)
+if ($opts->get_default_all) { # User wants to DEFAULT EVERYTHING
+	$opts->set_storage_sfx($def_sfx);
+	$opts->set_tasktype($def_tasktype);
+	sfx_prior_save($def_sfx);
+	tasktype_prior_save($def_tasktype, sfx=>$def_sfx);
+	$storage_sfx = $def_sfx;
+	$tasktype = $def_tasktype;
+	push @no_query_ok_msgs, "Defaulted tasktype";
+} elsif ($opts->get_store) { # User wants to STORE CLI OPTIONS
+	se "Storing provided options..." if $verbose;
+	if ($opts->get_storage_sfx // 0) { # If provided sfx to store
+		$storage_sfx = lc $opts->get_storage_sfx;
+		se "  Storing suffix ($storage_sfx)." if $verbose;
+		sfx_prior_save($storage_sfx);
+	} else { # If they didn't give sfx, then we don't store it.
+		# Instead, load a stored one if it exists.
+		$storage_sfx = sfx_prior_load() // $def_sfx;
+		$opts->set_storage_sfx($storage_sfx);
+	}
+	# If they provided a tasktype, store it:
+	if ($opts->get_tasktype // 0) {
+		$tasktype = lc $opts->get_tasktype;
+		tasktype_prior_save($tasktype, sfx=>$storage_sfx);
+	} else { # If not, load prior if it exists
+		$tasktype = tasktype_prior_load(sfx=>$storage_sfx) // $def_tasktype;
+		$opts->set_tasktype($tasktype);
+	}
+	push @no_query_ok_msgs, "Stored these CLI options (suffix, tasktype, etc.)";
+} else { # User has not forced defaults and not requested to store
+	$storage_sfx = lc ($opts->get_storage_sfx
+		// sfx_prior_load() // $def_sfx);
+	$tasktype = ($opts->get_tasktype
+		// tasktype_prior_load(sfx=>$storage_sfx)
+		// $def_tasktype);
+}
+
+my @images = $opts->get_image;  # Array of image paths
+my $use_clipboard = $opts->get_clipboard;
+my $opt_n_predict = $opts->get_n_predict;
+my $opt_n_probs = $opts->get_probs;
+my $opt_system = $opts->get_system;
+my $uprompt;
+
+if (@ARGV) {
+	if ($ARGV[0] eq '-') {
+		undef $/;
+		$uprompt = <STDIN>;
+		$uprompt = decode('UTF-8', $uprompt, Encode::FB_QUIET);
+	} else {
+		$uprompt = join(' ', @ARGV);
+	}
+}
+
+$HISTFILE = sprintf("$HISTFILE",
+	($storage_sfx // $def_sfx) eq '' ? '' : "_$storage_sfx");
+
+sel 1, "$clr_notice_bg${clr_notice_fg}Using history file:$rst $HISTFILE$rst";
+
+se "tasktype: {$tasktype}" if $verbose;
+se "     sfx: {$storage_sfx}" if $verbose;
+se "histfile: {$HISTFILE}" if $verbose;
+
+if ($opts->get_edit_hist) {
+	die "Input-only was selected (-I). Editing it makes no sense."
+		if $input_only;
+	$oumask = umask 0177;
+	my ($fh, $tfn) = tempfile("zhist-edit-XXXXXX", SUFFIX=>".json", UNLINK=>1, TMPDIR=>1);
+	copy($HISTFILE, $fh) or die "Copy failed: $!";
+	close $fh;
+	se "Editing history file $HISTFILE -> $tfn";
+	system('vim', '--', $tfn);
+	if (!compare($HISTFILE, $tfn)) {
+		se "No change.";
+	} else {
+		copy($tfn, $HISTFILE) or die "Failed to save history: $!";
+		se "History modified ($HISTFILE).";
+	}
+	umask $oumask;
+	exit;
+}
+
+sub sfx_prior_load {
+	my $s;
+	eval { $s = read_text($SFX_FN); chomp $s; };
+	if ($@) { $s = $def_sfx; }
+	return $s;
+}
+sub sfx_prior_save {
+	my $sfx = shift;
+	$sfx =~ s#[/]#_#g;
+	my $prior_str = sfx_prior_load();
+	if ($sfx eq $prior_str) {
+		se "No change needed to stored sfx ($sfx eq $prior_str)"
+			if $verbose>1;
+		return;
+	}
+	se "    Saving SFX ($sfx) to $SFX_FN" if $verbose;
+	$oumask = umask 0177;
+	write_text($SFX_FN, $sfx);
+	umask $oumask;
+}
+sub tasktype_prior_load {
+	my %fopts=@_;
+	my $sfx = $fopts{sfx} // '';
+	my $fn = sprintf($TASKTYPE_FN_FMT, $sfx eq '' ? '' : "_$sfx");
+	my $s;
+	eval { $s = read_text($fn); chomp $s; };
+	if ($@) { $s = $def_tasktype; }
+	return $s;
+}
+sub tasktype_prior_save {
+	my $tasktype = shift; my %fopts=@_;
+	my $sfx = $fopts{sfx} // '';
+	$sfx =~ s#[/]#_#g;
+	$tasktype =~ s#[/]#_#g;
+	my $prior_str = tasktype_prior_load(sfx=>$sfx);
+	if ($tasktype eq $prior_str) {
+		se "No change needed to stored tasktype" if $verbose>1;
+		return;
+	}
+	my $fn = sprintf($TASKTYPE_FN_FMT, $sfx eq '' ? '' : "_$sfx");
+	se "    Saving tasktype ($tasktype) to $fn" if $verbose;
+	$oumask = umask 0177;
+	write_text($fn, $tasktype);
+	umask $oumask;
+	se "Updated stored tasktype $fn <= $tasktype" if $verbose > 1;
+}
+
+sub safe_decode_json_file {
+    my ($path) = @_;
+    my $raw = read_binary($path);  # raw bytes, no encoding assumptions
+    my $decoded_json;
+    # Attempt strict UTF-8 decode first
+    try { $decoded_json = decode("UTF-8", $raw, Encode::FB_CROAK); }
+    catch { # Fallback: replace bad sequences with � (U+FFFD)
+        warn "UTF-8 decode failed: $_";
+        $decoded_json = decode("UTF-8", $raw, Encode::FB_DEFAULT);
+    };
+
+    my $parsed;
+    try { $parsed = decode_json($decoded_json); }
+    catch {
+        warn "JSON decode failed: $_";
+        # Optional fallback: replace non-ASCII chars to make breakage obvious
+        $decoded_json =~ s/[^[:ascii:]]/�/g;
+        try { $parsed = decode_json($decoded_json); }
+        catch {
+            se "Still failed to decode ($path) after sanitization: $_";
+            $parsed = undef;
+        };
+    };
+
+    return $parsed;
+}
+
+
+## CONVERSATION HISTORY early wiping:
+my $conversation_history = [];
+if ($opts->get_wipe) {
+	$conversation_history = [];
+
+	if ($input_only) {
+		sel 1, "Input-only (-I) specified. Wiping only in memory.";
+	} else {
+		$oumask = umask 0177;
+		write_text($HISTFILE, encode_json($conversation_history));
+		umask $oumask;
+		sel 1, "${yel}Conversation history wiped ($HISTFILE).$rst";
+		push @no_query_ok_msgs, "Wiped ($HISTFILE)";
+	}
+}
+
+if ($opts->get_token_count) {
+	my $input_text = $uprompt // '';
+	my $token_count;
+	if (!defined $input_text || $input_text eq '') {
+		se "${bred}No input text provided for token counting. See -h$rst";
+		se "${bred} LLMs put out 1 for this, so we'll save the effort. Here's your 1.$rst";
+		$token_count = 1;
+	} else {
+		$token_count = get_token_count($input_text);
+	}
+	print STDERR "Token count: ";
+	flush STDERR;
+	say $token_count;
+	exit;
+}
+
+if ($opts->get_tokens_full) {
+	my $input_text = $uprompt // '';
+	if (!defined $input_text || $input_text eq '') {
+		se "${bred}No input text provided for token counting. See -h$rst";
+		exit 1;
+	}
+	my @tokendata = http_tokenize($input_text, tokens_full=>1);
+	print STDERR "Token data ";
+	flush STDERR;
+	my $json = JSON::XS->new->utf8->canonical(1);
+	my $json_string = $json->encode(\@tokendata);
+	# Print the JSON string
+	print "$json_string\n";
+	exit;
+}
+
+## CONVERSATION HISTORY
+if (!$opts->get_wipe || $opts->get_history_input_file) {
+	my $history_file_input_only;
+	if ($opts->get_history_input_file) {
+		$history_file_input_only = $opts->get_history_input_file;
+	} else {
+		$history_file_input_only = $HISTFILE;
+	}
+	if (-e $history_file_input_only) {
+		my $json = read_text($history_file_input_only);
+		$json =~ s/,\s*(\]|\})/$1/g;
+		if ($json =~ /^\s*$/) {
+			$conversation_history = [];
+		} else {
+			$conversation_history = decode_json($json);
+			# if ($@) { $DB::single=1; }
+		}
+	}
+}
+
+
+sub generate_history {
+	my ($tplspec, $conversation_history, $uprompt_filled) = @_;
+	my $tplinst = $tplspec->{inst};
+	my $tplresp = $tplspec->{resp};
+	my $tplresppfx = $tplspec->{resppfx};
+	my $history_text='';
+	my $tplxs = Text::Xslate->new( verbose => 2, type    => 'text',);
+	my %xslate_opts;
+	my $user_part;
+	my $resp_part;
+
+	if (@$conversation_history) {
+		$history_text = '';
+		my $pruned_history = prune_history_array($conversation_history);
+		for my $entry (@$pruned_history) {
+			if (exists $entry->{user}) {
+				sel 2, "$bgmag${whi}HISTORY: Adding user item. ($$entry{user})$rst";
+				%xslate_opts = ( user => $entry->{user}, );
+				$user_part = $tplxs->render_string($tplinst, \%xslate_opts);
+				$history_text .= $user_part;
+			}
+			if (exists $entry->{assistant}) {
+				sel 2, "$bgmag${whi}HISTORY: Adding assistant item. ($$entry{assistant})$rst";
+				%xslate_opts = ( response => $entry->{assistant}, );
+				$resp_part = $tplxs->render_string($tplresp, \%xslate_opts);
+
+				$history_text .= $resp_part;
+			}
+		}
+
+	}
+	%xslate_opts = ( user => $uprompt_filled, );
+	$user_part = $tplxs->render_string($tplinst, \%xslate_opts);
+	$history_text .= $user_part;
+
+	if (defined $tplresppfx) {
+		if (ref($tplresppfx) eq 'JSON::PP::Boolean' || ref($tplresppfx) eq 'JSON::XS::Boolean') {
+			if ($tplresppfx == $jsontrue) {
+				%xslate_opts = ( response => '', );
+				$resp_part = $tplxs->render_string($tplresp, \%xslate_opts);
+				$history_text .= $resp_part;
+			}
+		}
+	}
+	return $history_text;
+}
+
+sub usage {
+	print <<"EOT";
+Usage: me [options] [task] "prompt" [options]
+Examples:
+	me "Tell me ..."
+	me jerry "Tell me ..."
+	me love "Tell me ..."
+Options:
+EOT
+	print $opts->usage();
+	exit;
+}
+sub se { say STDERR @_; }
+sub sel { my $l=shift; say STDERR @_ if $verbose >= $l; }
+sub pe { print STDERR @_; }
+sub pel { my $l=shift; print STDERR @_ if $verbose >= $l; }
+sub sewarn { say STDERR "$bgred$yel", @_, $rst; }
+
+if ($opts->get_interactive) {
+	se "I don't think interactive is supported. Probably we're about to error.";
+	if (@ARGV > 1) {
+		se "query on commandline not accepted for -i mode. only give task";
+		exit 1;
+	}
+	$uprompt=undef;
+}
+my $fn_config = glob("~/.config/zchat.json");
+
+##  Example json file (sysprompts.json):
+#{
+#	"instruct": {
+#		"inst_hash3": "$system\n\n### Instruction:\n$user\n\n### Response:\n",
+#		"inst_tokens": "system\n<|im_start|>$system<|im_end|>\n<|im_start|>user\n$user<|im_end|>\n<|im_start|>assistant\n"
+#	},
+#	"sysprompts": {
+#		"default": {
+#			"instruct": "inst_hash3",
+#			"system": "$datenow Below is a user's instruction and their AI assistant's response. The AI is very helpful, tender, and loving, but its answers are very concise comfortable spoken language. The AI never talks about itself."
+#		}
+#	}
+#}
+
+# {
+#	'sysprompts': {
+#	}
+# );
+my $cfg=load_json_file($fn_config);
+my $props = http_get_props();
+my $n_ctx = get_model_ctx();
+if ($opts->get_ctx) {
+	say $n_ctx;
+	exit;
+}
+sub show_model_meta {
+	my $props = shift;
+	for my $k (keys %$props) {
+		say "$k -> $$props{$k}";
+	}
+}
+if ($opts->get_metadata) { show_model_meta($props); exit; }
+
+$HISTLEN_TOKENS = $n_ctx;
+if ($opts->get_interactive && !$opts->get_no_color) {
+	$clr_r_pfx=$bmag;
+	$clr_r_sfx=$rst;
+}
+if (!$opts->get_interactive && !defined $uprompt) {
+	if (!@no_query_ok_msgs) {
+		se "${bred}No query provided. See -h$rst";
+	} else {
+		sel 1, "${bred}No query provided OK, for actions taken: (",
+			join(", ", @no_query_ok_msgs),
+			").";
+	}
+	exit 1;
+}
+sub d { defined $_[0] }
+sel 1, "    Task type: $tasktype";
+sel 1, "  User prompt: $uprompt" if d($uprompt);
+sel 1, "System prompt: " . ($opt_system // "{from task type. --system to override}");
+
+my $server_modelname = get_modelname_from_props($props);
+sel 1, "Server Model: $server_modelname";
+my $modelspec = get_modelspec_from_config(cfg=>$cfg, file=>$server_modelname);
+my $sani_modelname = sanitize_model_name($server_modelname);
+sub sanitize_model_name {
+	my $name = shift;
+	$name =~ s,^.*/,,;
+	$name =~ s,\.*?$,,;
+	$name;
+}
+sel 1, "Sanitized model name: $sani_modelname";
+
+if (!defined $modelspec) {
+	se "Server model ($server_modelname) not found in config ($fn_config)";
+	exit;
+}
+sel 1, "Model match in config: $$modelspec{shortname}";
+my $model_insttype = $modelspec->{insttype};
+sel 1, "  Model instruct type: $model_insttype";
+
+my $tplspec = $cfg->{templates}{$model_insttype};
+sel 1, "Template spec: $tplspec";
+
+sub load_taskspec_from_disk {
+	my $tasktype = shift;
+	my @cmd = ($bin_persona, '--path', 'find', $tasktype);
+	my $cmd = shell_quote(@cmd);
+	say "$bgblu$whi Loading Persona from disk with persona command $rst" if $verbose > 1;
+	say "  Command $cmd" if $verbose > 1;
+	my $str;
+	eval { $str = `$cmd`; };
+	if ($? != 0) {
+		sewarn "persona bin wasn't found or errored";
+		return undef;
+	}
+
+	say "    `persona` provided:" if $verbose > 2;
+	say "{{$bcya$str$rst}}" if $verbose > 2;
+	chomp $str;
+	my @personas = split(/\n/, $str);
+	if (!@personas) {
+		sewarn "No personas found in files matching '$tasktype'";
+		exit 1;
+	}
+	if (@personas > 1) {
+		sewarn "Multiple personas found for '$tasktype':";
+		se " $_" for @personas;
+		exit -1;
+	}
+	if ($verbose > 0) {
+		se "${bmag}Task spec file found: $whi$personas[0]$rst";
+	}
+	my $filename = $personas[0];
+	my $prompt = read_text($filename);
+	my $think = ($prompt =~ /\s*^==== z think$/sm);
+	$prompt =~ s/\s*^==== z.*$//sm;
+	my $taskspec = {
+		'system' => $prompt,
+		'think'=>$think//1,
+	};
+	return $taskspec;
+}
+
+# say "tasktype: ", $tasktype;
+my $taskspec;
+if (exists $cfg->{tasks}{$tasktype}) {
+	sel 1, "User task type: $bgblu$yel$tasktype$rst";
+	if (exists $cfg->{tasks}{$tasktype}{'alias'}) {
+		my $dst_tasktype = $cfg->{tasks}{$tasktype}{'alias'};
+		sel 1, "Task alias conversion from '$tasktype' to '$dst_tasktype'";
+		if (!defined $cfg->{tasks}{$dst_tasktype}) {
+			se "Unfound alias destination: $tasktype -> $dst_tasktype";
+			exit 1;
+		}
+		$tasktype = $dst_tasktype;
+	}
+	$taskspec = $cfg->{tasks}{$tasktype};
+} else {
+	if (!defined $taskspec) {
+		sewarn "Tasktype '$tasktype' not found in config file's {tasks} section."
+			if $verbose > 0;
+		$taskspec = load_taskspec_from_disk($tasktype);
+		if (!defined $taskspec) {
+			sewarn "Tasktype '$tasktype' not found in files";
+			$tasktype = $def_tasktype;
+			$taskspec = $cfg->{tasks}{$tasktype};
+			if (!defined $taskspec) {
+				sewarn "Fallback tasktype '$tasktype' not found in config file {tasks}";
+				exit 1;
+			}
+		}
+	}
+}
+sel 1, "Task spec: $bgblu$yel$taskspec$rst";
+
+if ($opts->get_grammar) {
+	# $taskspec->{grammar} = encode_json($opts->get_grammar);
+	$taskspec->{grammar} = $opts->get_grammar;
+	sel 1, "User-specified grammar: $bgblu$yel$$taskspec{grammar}$rst";
+}
+
+# Ensure multimodal support if images are used
+if (@images || $use_clipboard) {
+    unless ($modelspec->{'mm'}) {
+        se "${bred}ERROR: Multimodal model required for image support.$rst";
+        exit 22;  # EINVAL: Invalid argument
+    }
+}
+
+# Handle --image option
+my @image_data;
+if (@images) {
+    for my $index (0..$#images) {
+        my $image_path = $images[$index];
+        unless (-e $image_path) {
+            se "${bred}ERROR: Image file not found: $image_path$rst";
+            exit 2;
+        }
+
+        # Load image and convert to base64
+        my $image = Image::Magick->new;
+        $image->Read($image_path);
+        my $base64_image = encode_base64($image->ImageToBlob());
+
+        # Assign an ID for the image (img for one, img-1, img-2, etc. for multiple)
+        my $image_id = ($#images == 0) ? 'img' : "img-" . ($index + 1);
+
+        # Add the image to the image_data array
+        my $ora=a24fg(255,128,30);
+        say "${ora}Attaching image ${whi}$image_id$ora, Base64 len: " . length($base64_image);
+        push @image_data, { id => $image_id, data => $base64_image };
+    }
+}
+
+# Handle --clipboard option (check if it's an image or text)
+if ($use_clipboard) {
+    my $clip_data = Clipboard->paste;
+    
+    if ($clip_data =~ /^\xFF\xD8/) {  # Detect JPEG binary data
+        my $image_id = (@image_data) ? "img-" . (scalar(@image_data) + 1) : 'img';
+        my $base64_image = encode_base64($clip_data);
+        push @image_data, { id => $image_id, data => $base64_image };
+    } elsif ($clip_data =~ /^\p{IsPrint}/) {  # Detect plain text
+        $uprompt = encode_utf8($clip_data);  # Use as the prompt text
+    } else {
+        se "${bred}ERROR: Unsupported clipboard content. Only text and images are supported.$rst";
+        exit 22;
+    }
+}
+
+# If images are present, include them in the final prompt
+
+my $image_refs = '';
+if (@image_data) {
+# Image format dispatch
+	my $imgfmt = $modelspec->{imgfmt};
+	if (!defined $imgfmt) {
+		se "${bred}ERROR: modelspec does not have {imgfmt}. We support 'qwen2' and 'gemma3'.$rst";
+		exit 23;  # custom exit code
+	}
+
+    if ($imgfmt eq 'qwen2') {
+        # Qwen2 format using [img], [img-1], etc.
+        my $image_refs = join(' ', map { "[$_->{id}]" } @image_data);
+
+        # Check for [img*] tags already in prompt
+        my @existing_image_tags = ($uprompt =~ /\[img(?:-\d+)?\]/g);
+        if (@existing_image_tags) {
+            if (scalar(@existing_image_tags) != scalar(@image_data)) {
+                se "${yel}WARNING: Mismatch between number of specified images and image tags in the prompt.$rst";
+            }
+        } else {
+            $uprompt = "$image_refs $uprompt";
+        }
+
+    } elsif ($imgfmt eq 'gemma3') {
+        # Gemma3 style: <start_of_turn>user\nImage A: <start_of_image>\n...
+        my $image_prefix = "";
+        for my $i (0 .. $#image_data) {
+        	my $ch = chr(65 + $i);   # A, B, C...
+            $image_prefix .= "Image $ch: <start_of_image>\n";
+        }
+        $image_prefix .= "\n";
+        for my $i (0 .. $#image_data) {
+        	my $ch = chr(65 + $i);   # A, B, C...
+			#$image_prefix .= "Label $ch: Image $ch\n";
+            # $image_prefix .= "Label $ch: file:///img-$ch.png\n";
+            $image_prefix .= "Label $ch: https://127.0.0.1/i/$ch.png\n";
+        }
+        $uprompt = "$image_prefix\n$uprompt";
+    	
+    } else {
+        se "${bred}ERROR: Unsupported imgfmt '$imgfmt'. Supported formats are: 'qwen2', 'gemma3'.$rst";
+        exit 24;
+    }
+}
+
+
+if (defined $opt_system) {
+	$taskspec = {
+		system=>$opt_system,
+		upfx=>$opt_system,
+	};
+}
+
+my $assistant_response = complete_with_mojo(
+	tplspec=>$tplspec,
+	taskspec=>$taskspec,
+	modelspec=>$modelspec,
+	uprompt=>$uprompt,
+	args=>$opts);
+# Switch("--play_user|--pu")->doc("Play user text"),
+# Switch("--play_resp|--pr")->doc("Play response text"),
+if ($opts->get_play_resp) {
+	my @incmd = ('printf', '%s', $assistant_response);
+	my @cmd = ('vpi');
+	my $incmd = shell_quote(@incmd);
+	my $cmd = shell_quote(@cmd);
+	system("$incmd | $cmd");
+}
+say '';
+exit;
+
+sub format_prompt {
+	my %opts = @_;
+	my $tplspec = $opts{tplspec} // die "Missing tplspec";
+	my $taskspec = $opts{taskspec} // die "Missing taskspec";
+	my $sprompt = $opts{sprompt};
+	my $uprompt = $opts{uprompt} // die "Missing uprompt";
+	my $system = $opts{system} // 1;
+	my $upfx = $taskspec->{upfx};
+	my $datenow = make_datenow();
+
+	my $tplmain = $tplspec->{main};
+	my $tplinst = $tplspec->{inst};
+	my $tplresp = $tplspec->{resp};
+
+	my $tplxs = Text::Xslate->new(
+		verbose => 2,
+		type    => 'text',
+	);
+	my %xslate_opts = (
+		datenow => $datenow,
+		modelname => $sani_modelname,
+	);
+	my $upfx_filled = '';
+	if (!$system) {
+		if (defined $upfx && $upfx ne '') {
+			$upfx_filled = $tplxs->render_string($upfx, \%xslate_opts);
+			$xslate_opts{user} = $upfx_filled;
+			$upfx_filled = $tplxs->render_string($tplinst, \%xslate_opts);
+		}
+	}
+
+	my $sprompt_filled='';
+	if ($system) {
+		sel 2, "System prompt UNFILLED: {$sprompt}";
+		$sprompt_filled = $sprompt ? $tplxs->render_string($sprompt, \%xslate_opts) : '';
+	}
+	sel 1, "${whi} Sys prompt-filled:$rst $sprompt_filled";
+
+	my $history_text = generate_history(
+		$tplspec,
+		$opts->get_no_history ? [] : $conversation_history,
+		$uprompt);
+
+	if (!$system) {
+		$history_text = $upfx_filled . $history_text;
+	}
+
+	sel 1, "${yel}User prefix filled:$rst";
+	sel 1, "${bgblu}{{$whi$upfx_filled${rst}}}";
+	sel 1, "${yel}Final history:$rst";
+	sel 1, "${bgblu}{{$whi$history_text${rst}}}";
+
+	%xslate_opts = (
+		datenow => $datenow,
+		system  => $system ? $sprompt_filled : $upfx_filled,
+		history => $history_text,
+		modelname => $sani_modelname,
+	);
+	my $final_prompt = $tplxs->render_string($tplmain, \%xslate_opts);
+	$final_prompt =~ s/^\s+//;
+	my $tplresppfx = $tplspec->{resppfx};
+
+	if (defined $tplresppfx) {
+		if (!ref($tplresppfx)) {
+			if ($tplresppfx ne '' && $tplresppfx ne '0') {
+				$final_prompt .= $tplresppfx;
+			}
+		}
+	}
+
+	sel 1, "${bcya}UPFX:$rst $upfx_filled " . ($system ? "(${bro}Inactive$rst)" : "(${gre}Active$rst)");
+	sel 1, "${bcya}System:$rst $sprompt_filled " . ($system ? "(${gre}Inactive$rst)" : "(${bro}INactive$rst)");
+	sel 1, "${bcya}User:$rst $uprompt";
+	sel 1, "${bcya}History:$rst $history_text";
+	sel 1, "${bcya}Datenow:$rst $datenow";
+	sel 1, "${bcya}Rendered template:$rst\n''" . a24bg(30, 90, 40) . "$whi$final_prompt$rst''";
+
+	# $final_prompt =~ s/\s+$//;
+
+	return $final_prompt;
+}
+
+sub complete_with_mojo {
+	my %opts = @_;
+	my $tplspec = $opts{tplspec} // die "Missing tplspec=>";
+	my $taskspec = $opts{taskspec} // die "Missing taskspec=>";
+	my $modelspec = $opts{modelspec} // die "Missing modelspec=>";
+	my $uprompt = $opts{uprompt} // die "Missing uprompt=>";
+	my $args = $opts{args} // die "Missing args=>";
+
+	my $sprompt = $taskspec->{system};
+	my $system = $modelspec->{system} // 1;
+	my $grammar = $taskspec->{grammar} // '';
+	my $rm_re = $tplspec->{rm_re};
+	my $show_thought = $args->get_thought;
+	if ($$taskspec{think}) {
+		$rm_re = "(?:<think>)?.*</think>\\s*";
+	}
+
+	my $lo_live = 1;
+	# Live is forced-disabled if a remove pattern was specified
+	#  unless showing thought is enabled, where it's okay to leave it live.
+	if ($rm_re//0) {
+		if (!$show_thought) {
+			$lo_live = 0;
+		}
+	}
+
+	my $prompt = format_prompt(
+		tplspec=>$tplspec,
+		taskspec=>$taskspec,
+		system=>$system,
+		sprompt=>$sprompt,
+		uprompt=>$uprompt,
+	);
+
+# $prompt = '<|im_start|>system
+# You are a helpful assistant<|im_end|>
+# <|im_start|>user
+# Hello<|im_end|>
+# <|im_start|>assistant
+# Hi there<|im_end|>
+# <|im_start|>user
+# How are you?<|im_end|>
+# <|im_start|>assistant
+# ';
+	my $data = {
+		prompt => $prompt,
+		temperature => 0.7,
+		top_k => 40,
+		top_p => 0.9,
+		min_p => 0.08,
+		n_predict => int($opt_n_predict),
+		cache_prompt => $cacheprompt,
+		stop => [
+			"<0x0A>### Instruction:", 
+			"\n### Instruction:", 
+			"<|im_end|>", 
+			"<|eot_id|>", 
+			"<end_of_turn>"
+		],
+		stream => Mojo::JSON::true,
+	};
+	$data->{grammar} = $grammar if $grammar;
+	$data->{image_data} = \@image_data if @image_data;
+	$data->{n_probs} = int($opt_n_probs) if $opt_n_probs;
+	# die "Dump of json data: {{\n$bgblu$yel". Dumper(\$data), "$rst\n}}";
+
+	my $ua = Mojo::UserAgent->new(max_response_size => 0);
+	my $tx = $ua->build_tx(
+		POST => "$apiurlbase/completion",
+		{ 'Content-Type' => 'application/json' },
+		json => $data
+	);
+
+	my $answer = '';  # Accumulate final result here
+	my $token_cnt=0;
+
+	my $json_accumulator = '';  # To accumulate chunks
+
+	$tx->res->content->unsubscribe('read')->on(read => sub {
+		my ($content, $bytes) = @_;
+		$json_accumulator .= $bytes;  # Accumulate all bytes
+
+		# Split the accumulated data on newlines, as you're processing line-by-line JSON events
+		while ($json_accumulator =~ s/^([^\n]*)\n//) {
+			my $line = $1;
+			if ($line !~ /^data: (.*)$/) { next; }
+			$line = $1;
+			
+			my $decoded;
+			eval { $decoded = decode_json($line); };
+			
+			if ($@) {
+				warn "Failed to decode JSON: $@";
+				warn "Accumulated bytes: ``$json_accumulator''";
+				return;
+			}
+			if ($decoded->{stop}) {
+				last;
+			}
+			sel 3, "  Line: ''$bgmag$bla$line$rst''";
+			
+			if (defined $decoded->{content}) {
+				my $content = $decoded->{content};
+				$content =~ s/<0x0A>/\n/g;
+				$content =~ s/<0x([0-9A-F][0-9A-F])>/<0x?$1?>/g;
+				if (!$token_cnt) {
+					$content =~ s/^\s//;
+				}
+				if ($lo_live) { print $content; }
+				$answer .= $content; # build, even if live, for history
+				$token_cnt++;
+			}
+		}
+	});
+
+
+	# Start transaction and process it
+	$ua->start($tx);
+	if (!$lo_live) {
+		if ($rm_re//0) {
+			if ($verbose) {
+				my $colorized_answer = $answer;
+				my $bg = a24bg(40,0,70);
+				$colorized_answer =~ s/$rm_re/$bg$whi$&$rst/s;
+				se "ANSWER WITH THOUGHT: {{$colorized_answer}}";
+			}
+			if (!$args->get_thought) {
+				$answer =~ s/$rm_re//s;
+			}
+		}
+		print "$answer";
+	}
+	append_to_history($uprompt, $answer);
+	return $answer;
+}
+
+sub prune_history_array {
+	my $histarr = shift;
+	my $pruned;
+
+	# Trim history based on lines
+	if ($HISTLEN_LINES == -1) {
+		$pruned = [@$histarr];
+	} else {
+		my $start = $#{$histarr} - $HISTLEN_LINES + 1;
+		$start = 0 if $start < 0;
+		$pruned = [@{$histarr}[$start .. $#{$histarr}]];
+	}
+
+	# Trim history based on tokens
+	while (calculate_token_length($pruned) > $HISTLEN_TOKENS) {
+		if (scalar(@$pruned) > 0 && length($pruned->[0]->{user}) > 3) {
+			$pruned->[0]->{user} = '...';  # Replace user prompt with '...'
+		} else {
+			shift @$pruned;  # If already '...', remove it
+		}
+	}
+	$pruned;
+}
+
+sub append_to_history {
+    my ($user_prompt, $response) = @_;
+    sel 2, "User prompt: {{$bgblu$yel$user_prompt$rst}}";
+    sel 2, "Appending response: {{$bgblu$yel$response$rst}}";
+    push @$conversation_history, {user => $user_prompt, assistant => $response};
+    
+    if ($stg_trim_history) {
+    	$conversation_history = prune_history_array($conversation_history);
+	}
+
+	if ($input_only) {
+		sel 1, "NOT updating history file. (-I specified)";
+	} else {
+		my $json = JSON::XS->new->pretty(1)->utf8->
+			space_after->encode($conversation_history);
+		sel 2, "Writing history file: {{$bgred$yel$json$rst}}";
+		$oumask = umask 0177;
+		write_text($HISTFILE, "$json");
+		umask $oumask;
+	}
+}
+
+# Helper function to calculate the total length of tokens in the history
+sub calculate_token_length {
+    my ($history) = @_;
+    my $token_count = 0;
+    
+    foreach my $entry (@$history) {
+        $token_count += length($entry->{user}) + length($entry->{assistant});
+    }
+
+    return $token_count;
+}
+
+# sub http_tokenize {
+#     my $str = shift;
+#     my %opts = @_;
+#     my $tokens_full = $opts{tokens_full} // 0;
+
+#     my $ua = LWP::UserAgent->new(timeout => 2);
+#     my $url = "$apiurlbase/tokenize";
+#     my $json = encode_json({ content => $str });
+#     my $req = HTTP::Request->new('POST', $url);
+#     $req->content_type('application/json');
+#     $req->content($json);
+#     my $res = $ua->request($req);
+#     if ($res->is_success) {
+#         my $tokens = decode_json($res->decoded_content);
+#         return @{$tokens->{tokens}};
+#     } else {
+#         warn "HTTP Request failed: ", $res->status_line;
+#         return;
+#     }
+# }
+
+sub http_tokenize {
+	my $str = shift;
+	my %opts = @_;
+	my $tokens_full = $opts{tokens_full} // 0;
+
+	my $ua = LWP::UserAgent->new(timeout => 2);
+	my $url = "$apiurlbase/tokenize";
+
+	# Construct request data
+	my $request_data = { content => $str };
+	if ($tokens_full) {
+		$request_data->{with_pieces} = JSON::XS::true;
+	}
+
+	my $json = encode_json($request_data);
+	my $req = HTTP::Request->new('POST', $url);
+	$req->content_type('application/json');
+	$req->content($json);
+	my $res = $ua->request($req);
+	if ($res->is_success) {
+		my $response_data = decode_json($res->decoded_content);
+		return @{$response_data->{tokens}}; # Return full token array
+	} else {
+		warn "HTTP Request failed: ", $res->status_line;
+		return;
+	}
+}
+
+sub get_token_count {
+	my ($str) = @_;
+	my @tokens = http_tokenize($str);
+	return scalar @tokens;
+}
+
+sub get_model_ctx {
+	my ($str) = @_;
+	my $n_ctx = $props->{"default_generation_settings"}->{"n_ctx"};
+	return $n_ctx;
+}
+
+sub get_modelspec_from_config {
+	my %opts = @_;
+	my $cfg = $opts{cfg} // die "Need cfg";
+	my $file = $opts{file} // die "Need file";
+	my $models = $cfg->{models};
+	sel 2, " Searching cfg->models for file: $file";
+	for my $ms (@{$models}) {
+		my $re = $ms->{re};
+		sel 2, "  re: $re";
+		if ($file =~ /$re/i) {
+			sel 1, "   ${bgre}Model spec match:$rst $file =~ $re";
+			return $ms;
+		}
+	}
+	return undef;
+}
+sub get_modelname_from_props {
+	my $props = shift;
+	# my $mpath = $props->{"default_generation_settings"}{"model"};
+	my $mpath = $props->{"model_path"};
+	$mpath =~ s#^.*/##;
+	$mpath =~ s#\.[^.]+$##;
+	$mpath;
+}
+sub http_get_props {
+	my $url = "$apiurlbase/props";
+	sel 1, "http_get_props() Url: $url";
+	my $ua = LWP::UserAgent->new(timeout => 2);
+	# my $response = $ua->post($url, 'Content-Type' => 'application/json',);
+	my $response = $ua->get($url);
+	unless ($response->is_success) {
+		die "HTTP GET error: ", $response->status_line;
+	}
+	my $data = decode_json($response->decoded_content);
+	return $data;
+}
+
+sub load_json_file {
+	my $fn = shift;
+	open my $fh, '<', $fn or die "Cannot open file $fn $!";
+	my $jsontxt = do { local $/; <$fh> };
+	close $fh;
+	my $json = json_relaxed();
+	my $data = $json->decode($jsontxt);
+	$data;
+}
+
+sub json_relaxed { JSON::XS->new->relaxed(1) }
+
+sub make_datenow {
+	my $date_now = strftime('%a %Y-%m-%d %H:%M:%S%z', localtime);
+	return $date_now;
+}

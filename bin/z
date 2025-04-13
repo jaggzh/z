@@ -399,11 +399,11 @@ sub generate_history {
 
 sub usage {
 	print <<"EOT";
-Usage: me [options] [task] "prompt" [options]
+Usage: z [options] [task] "prompt" [options]
 Examples:
-	me "Tell me ..."
-	me jerry "Tell me ..."
-	me love "Tell me ..."
+	z Tell me something      # Convenience to just type
+	z -t jerry "Tell me ..." # Pick a system prompt (defined in z-llm.json)
+	echo "Tell me ..." | z -t love -  # Input securely from stdin
 Options:
 EOT
 	print $opts->usage();

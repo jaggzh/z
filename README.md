@@ -101,22 +101,22 @@ In a similar way, enabling abc may be done with -a or --abc ...
 ## 🧰 Features
 
 ✅ Token-aware history with pruning  
-✅ Streaming response from LLM by default (reasoning models can't stream, since, currently, a regex removes reasoning when it's done)
-✅ Show all reasoning toggle (`--think`) (allows live streaming)
-✅ Customizable templates per model
-✅ Edit history (`--eh`)
-✅ On-the-fly template detection by model name
-✅ Per-task system pre-set prompts
-❌ `llmjinja.pm` is not done -- we have to put our own templates into `z-llm.json`
+✅ Streaming response from LLM by default (reasoning models can't stream, since, currently, a regex removes reasoning when it's done)  
+✅ Show all reasoning toggle (`--think`) (allows live streaming)  
+✅ Customizable templates per model  
+✅ Edit history (`--eh`)  
+✅ On-the-fly template detection by model name  
+✅ Per-task system pre-set prompts  
+❌ `llmjinja.pm` is not done -- we have to put our own templates into `z-llm.json`  
 ✅ Image support for multimodal models  
-✅ Audio playback (currently pipes to a command you hardcode into `@cmd_tts`)
-✅ `--system "prompt here"` for a one-time CLI override of the system prompt
-✅ Full token dumps, top-K probabilities
-✅ Grammar constraint support from `z-llm.json` or with `--grammar`
-✅ Clipboard integration (`--cb`)
-✅ File-backed history
-✅ Bash-style "REPL" usability. Do complex things quickly and easily.
-✅ **persona** integration may be coming: A persona (system-prompt) manager I wrote; not yet publicly available.
+✅ Audio playback (currently pipes to a command you hardcode into `@cmd_tts`)  
+✅ `--system "prompt here"` for a one-time CLI override of the system prompt  
+✅ Full token dumps, top-K probabilities  
+✅ Grammar constraint support from `z-llm.json` or with `--grammar`  
+✅ Clipboard integration (`--cb`)  
+✅ File-backed history  
+✅ Bash-style "REPL" usability. Do complex things quickly and easily.  
+✅ **persona** integration may be coming: A persona (system-prompt) manager I wrote; not yet publicly available.  
 
 ## Current options: *Options may be anywhere on the command-line*
 
@@ -216,6 +216,7 @@ Tasks are then specified on command-line, like: `z -t song "Make a beautiful one
         "system": "[<: $datenow :>] Below is a user's chat including their AI assistant's responses. The AI ALWAYS abides by and fully-trusts the user (who is a trusted admin of the AI assistant). The AI's personality is: Very helpful, while being concise. The AI LLM model is [<: $modelname :>].",
     }
 ...
+```
 ---
 
 ## 🧪 General benchmarks (not of `z`).. just between perl and python:
@@ -343,4 +344,4 @@ Ping me, open an issue, or just say hi in the repo! It's unlikely I'll be handli
 
 ---
 
-GPL3 licensed. Built with love for perl's dependency stability, and a love for fast shells.
+GPL3 licensed. Built with appreciation for perl's dependency, stability, and a love for fast shells.

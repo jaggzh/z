@@ -25,6 +25,11 @@ use File::Copy;
 use File::Temp qw(tempfile);
 use File::Compare;
 use Carp 'confess';
+use Term::ReadLine;
+use Term::ReadLine::Gnu qw(RL_PROMPT_START_IGNORE RL_PROMPT_END_IGNORE);
+my $C_IGN_S = RL_PROMPT_START_IGNORE;
+my $C_IGN_E = RL_PROMPT_END_IGNORE;
+
 $SIG{__DIE__} = sub { confess @_ };
 
 # no autovivification;
@@ -58,12 +63,18 @@ my $SFX_FN = "/tmp/llamachat_sfx-$user.json";
 my $HISTLEN_LINES = -1; # 50;	# lines (back and forth pairs)
 # HISTLEN_TOKENS will be overridden later by n_ctx from model props
 my $HISTLEN_TOKENS = int($ctx*.7)-38; # 70%? - space for system prompt??
+my $READLINE_HISTFILE = "/tmp/llamachat_readline-$user.json";
 my $verbose = 0;
 my $verbose_resp = 0;
 my $outfn_au_user = "/tmp/zchat-$user-user.wav";
 my $outfn_au_resp = "/tmp/zchat-$user-resp.wav";
-my $clr_r_pfx='';
-my $clr_r_sfx='';
+
+my $clr_user=a24bg(35,0,35). a24fg(230,255,255);
+my $clr_sys=a24bg(5,20,40). a24fg(230,245,255);
+# Prompt in interactive mode
+my $intmode_prompt = "$C_IGN_S$gra$C_IGN_E> $C_IGN_S$rst$clr_user$C_IGN_E";
+my $term; # For term readline object
+
 my $sysarg;
 my $query;
 my $cacheprompt=JSON::XS::true;
@@ -91,7 +102,7 @@ my @specs = (
 	Switch("--play_user|--pu")->doc("Play user text"),
 	Switch("--play_resp|--pr")->doc("Play response text"),
 	Param("--probs")->doc("Return probabilities for top N tokens (default: disabled (0))"),
-	Switch("--no_color|-C")->doc("Disable color (used in interactive mode)"),
+	Switch("--no-color|-C")->doc("Disable color (used in interactive mode)"),
 	Switch("--no-cache|-u")->doc("Disable cache (ignore. unused)"),
 	Switch("--wipe|-w")->doc("Wipe prompt history"),
 	Switch("--no-history|-H")->doc("Do not use history. No load, no store."),
@@ -167,6 +178,7 @@ my $use_clipboard = $opts->get_clipboard;
 my $opt_n_predict = $opts->get_n_predict;
 my $opt_n_probs = $opts->get_probs;
 my $opt_system = $opts->get_system;
+my $intmode = $opts->get_interactive;
 my $uprompt;
 
 if (@ARGV) {
@@ -416,14 +428,6 @@ sub pe { print STDERR @_; }
 sub pel { my $l=shift; print STDERR @_ if $verbose >= $l; }
 sub sewarn { say STDERR "$bgred$yel", @_, $rst; }
 
-if ($opts->get_interactive) {
-	se "I don't think interactive is supported. Probably we're about to error.";
-	if (@ARGV > 1) {
-		se "query on commandline not accepted for -i mode. only give task";
-		exit 1;
-	}
-	$uprompt=undef;
-}
 my $fn_config = glob("~/.config/zchat.json");
 
 ##  Example json file (sysprompts.json):
@@ -460,13 +464,13 @@ sub show_model_meta {
 if ($opts->get_metadata) { show_model_meta($props); exit; }
 
 $HISTLEN_TOKENS = $n_ctx;
-if ($opts->get_interactive && !$opts->get_no_color) {
-	$clr_r_pfx=$bmag;
-	$clr_r_sfx=$rst;
+if (!$intmode || $opts->get_no_color) {
+	$clr_user='';
+	$clr_sys='';
 }
-if (!$opts->get_interactive && !defined $uprompt) {
+if (!$intmode && !defined $uprompt) {
 	if (!@no_query_ok_msgs) {
-		se "${bred}No query provided. See -h$rst";
+		se "${bred}No query provided. See -h or use -i interactive mode$rst";
 	} else {
 		sel 1, "${bred}No query provided OK, for actions taken: (",
 			join(", ", @no_query_ok_msgs),
@@ -684,21 +688,55 @@ if (defined $opt_system) {
 	};
 }
 
-# Switch("--play_user|--pu")->doc("Play user text"),
-# Switch("--play_resp|--pr")->doc("Play response text"),
-if ($opts->get_play_user) {
-	tts_str($uprompt);
+# This is all so the user's text, on a background color, doesn't cause a
+# fully-colored blank line after it. We need to reset the color
+# before their 'enter' goes through. It's handled with term->add_defun()
+# lower down
+sub term_reset_and_accept_line {
+    my ($count, $key) = @_; print "$rst";
+    $term->call_function("accept-line", $count, $key);
 }
-my $assistant_response = complete_with_mojo(
-	tplspec=>$tplspec,
-	taskspec=>$taskspec,
-	modelspec=>$modelspec,
-	uprompt=>$uprompt,
-	args=>$opts);
-if ($opts->get_play_resp) {
-	tts_str($assistant_response);
+if ($intmode) {
+	$term = Term::ReadLine->new("z") or die "Cannot create Term::ReadLine object";
+    $term->ReadHistory($READLINE_HISTFILE) if -e $HISTFILE;
+    my $termattribs = $term->Attribs();
+	$term->add_defun("accept-line", \&term_reset_and_accept_line, ord("\n"));
+	$term->add_defun("accept-line", \&term_reset_and_accept_line, ord("\r"));
+	# $term->bind_key(ord("\r"), "accept-line"); # This method didn't work
+	# $term->bind_key(ord("a"), "accept-line");
 }
-say '';
+
+while (1) {
+    # If initial query (cli or piped), process it first.
+    if (defined $uprompt and $uprompt ne '') {
+			# Switch("--play_user|--pu")->doc("Play user text"),
+			# Switch("--play_resp|--pr")->doc("Play response text"),
+		tts_str($uprompt) if $opts->get_play_user;
+		print $clr_sys;
+        my $assistant_response = complete_with_mojo(
+            tplspec   => $tplspec,
+            taskspec  => $taskspec,
+            modelspec => $modelspec,
+            uprompt   => $uprompt,
+            args      => $opts,
+        );
+		say $rst;
+		tts_str($assistant_response) if $opts->get_play_resp;
+    }
+
+    if ($intmode) { # If interactive mode...
+    	my $line = $term->readline($intmode_prompt);
+    	print "$rst";
+        # $line =~ s/^\s+|\s+$//g;
+        
+        # quit with ctrl-d (undef), 'q', or 'quit'
+        last if !defined($line) || $line =~ /^(q|quit)$/i;
+        $term->addhistory($line) if $line ne '';
+        $uprompt = $line;
+    }
+    last if !$intmode;
+}
+$term->write_history($READLINE_HISTFILE) if $intmode;
 exit;
 
 sub tts_str {

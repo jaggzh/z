@@ -510,8 +510,8 @@ sub load_taskspec_from_disk {
 	my $tasktype = shift;
 	my @cmd = ($bin_persona, '--path', 'find', $tasktype);
 	my $cmd = shell_quote(@cmd);
-	say "$bgblu$whi Loading Persona from disk with persona command $rst" if $verbose > 1;
-	say "  Command $cmd" if $verbose > 1;
+	sel 1, "$bgblu$whi Loading Persona from disk with persona command $rst";
+	sel 1, "  Command $cmd";
 	my $str;
 	eval { $str = `$cmd`; };
 	if ($? != 0) {
@@ -519,8 +519,8 @@ sub load_taskspec_from_disk {
 		return undef;
 	}
 
-	say "    `persona` provided:" if $verbose > 2;
-	say "{{$bcya$str$rst}}" if $verbose > 2;
+	sel 2, "    `persona` provided:";
+	sel 2, "{{$bcya$str$rst}}";
 	chomp $str;
 	my @personas = split(/\n/, $str);
 	if (!@personas) {
@@ -693,7 +693,8 @@ if (defined $opt_system) {
 # before their 'enter' goes through. It's handled with term->add_defun()
 # lower down
 sub term_reset_and_accept_line {
-    my ($count, $key) = @_; print "$rst";
+    my ($count, $key) = @_;
+    print "$rst"; # Should only be if in intmode
     $term->call_function("accept-line", $count, $key);
 }
 if ($intmode) {
@@ -712,7 +713,7 @@ while (1) {
 			# Switch("--play_user|--pu")->doc("Play user text"),
 			# Switch("--play_resp|--pr")->doc("Play response text"),
 		tts_str($uprompt) if $opts->get_play_user;
-		print $clr_sys;
+		print $clr_sys if $intmode;
         my $assistant_response = complete_with_mojo(
             tplspec   => $tplspec,
             taskspec  => $taskspec,
@@ -720,7 +721,7 @@ while (1) {
             uprompt   => $uprompt,
             args      => $opts,
         );
-		say $rst;
+		say $rst if $intmode;
 		tts_str($assistant_response) if $opts->get_play_resp;
     }
 

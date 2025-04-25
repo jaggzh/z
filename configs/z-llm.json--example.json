@@ -1,0 +1,121 @@
+{ # This is truncated for our chat
+	"models": [
+		# system: Model accepts system prompt (I think this defaults to true.
+		# mm: Multimodal (accepts images)
+		#   (If false, we try to use upfx from template)
+		# In templates, 'upfx' is the same as 'system' except for models without system prompts (like gemma and I think phi); it lets you use different wording.
+		{
+			"shortname": "mixtao-2x7b",
+			"example": "MixTAO-7Bx2-MoE-Instruct-v7.0.Q6_K",
+			"re": "^mixtao",
+			"insttype": "inst_hash3",
+		}, {
+			"shortname": "deepseek",
+			"example": "DeepSeek-R1-Distill-Qwen-14B-Q6_K",
+			"re": "deepseek.*qwen",
+			"insttype": "inst_deepseek",
+			"system": true,
+		}, {
+			"shortname": "qwen2.5-14b-instruct",
+			"example": "qwen2.5-14b-instruct",
+			"re": "qwen.*2",
+			"insttype": "inst_tokens",
+			"system": true,
+			"imgfmt": "qwen2",
+		}, {
+			"shortname": "phi4",
+			"example": "Phi-4-medium-4k-instruct-Q6_K.gguf",
+			"re": "^phi-4",
+			"insttype": "inst_phi4",
+			"system": true,
+		}, {
+			"shortname": "gemma",
+			"example": "gemma-3-27b-it-IQ4_XS.gguf",
+			"re": "gemma",
+			"insttype": "inst_gemma",
+			"imgfmt": "gemma3",
+			"mm": true,
+			"system": false,
+		}, {
+			"shortname": "meta-llama",
+			"example": "meta-llama-3.1-8b-instruct-q8_0.gguf",
+			"re": "llama",
+			"insttype": "inst_llama",
+		}, {
+			"shortname": "deepcoder-14b-preview",
+			"example": "deepcoder-14b-preview",
+			"re": "deepcoder.*preview",
+			"insttype": "inst_deepseek_coder",
+		},
+	],
+ 	"templates": {
+		"inst_llama_debug": {
+			"inst": "(INST) <|begin_of_text|><|start_header_id|>user<|end_header_id|>\n<: $user :>\n<|eot_id|>(/INST)",
+			"resp": "(RESP) <|start_header_id|>assistant<|end_header_id|>\n<: $response :>\n<|eot_id|>(/RESP)",
+			"main": "(MAIN) <|begin_of_text|><|start_header_id|>system<|end_header_id|>\n<: $system :>\n<|eot_id|>\n<: $history :>\n<|start_header_id|>assistant<|end_header_id|>(/MAIN)\n"
+		},
+		"inst_llama": {
+			"inst": "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n<: $user :>\n<|eot_id|>",
+			"resp": "<|start_header_id|>assistant<|end_header_id|>\n<: $response :>\n<|eot_id|>",
+			"main": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n<: $system :>\n<|eot_id|>\n<: $history :>\n<|start_header_id|>assistant<|end_header_id|>\n"
+		},
+		"inst_hash3": {
+			"inst": "\n### Instruction:\n<: $user :>",
+			"resp": "\n### Response:\n<: $response :>",
+			"main": "<: $system :>\n<: $history :>",
+		},
+		"inst_tokens": {
+			"inst": "\n<|im_start|>user\n<: $user :>\n<|im_end|>\n",
+			"resp": "\n<|im_start|>assistant\n<: $response :>\n<|im_end|>\n",
+			"main": "<|im_start|>system\n<: $system :>\n<|im_end|>\n<: $history :>",
+			"resppfx": false,
+		},
+		"inst_gemma": {
+			"inst": "<start_of_turn>user\n<: $user :><end_of_turn>\n",
+			"resp": "<start_of_turn>model\n<: $response :><end_of_turn>\n",
+			"main": "<start_of_turn>user\n<: $system :>\n\n<: $history :><start_of_turn>model\n",
+			"resppfx": false,
+		},
+		"inst_phi4": {
+			"inst": "<|im_start|>user<|im_sep|><: $user :><|im_end|>",
+			"resp": "<|im_start|>assistant<|im_sep|><: $response :><|im_end|>",
+			"main": "<|im_start|>system<|im_sep|><: $system :><|im_end|><: $history :>",
+			"resppfx": "<|im_start|>assistant<|im_sep|>",
+		},
+		"inst_deepseek": {
+			"inst": "<|begin_of_text|><|User|>\n<: $user :>\n<|eot|>",
+			"resp": "<|Assistant|>\n<: $response :>\n<|eot|>",
+			"main": "<|begin_of_text|><|System|>\n<: $system :>\n<|eot|>\n<: $history :>\n<|Assistant|><think>\n",
+			"resppfx": false,
+			"rm_re": "(?:<think>)?.*</think>\\s*",
+		},
+		"inst_deepseek_coder": {
+			"inst": "<｜User｜><: $user :>",
+			"resp": "<｜Assistant｜><: $response :><｜end▁of▁sentence｜>",
+			"main": "<｜begin▁of▁sentence｜><: $system :><: $history :><｜Assistant｜><think>",
+			"rm_re": "(?:<think>)?.*</think>\\s*",
+		}
+			# "resppfx": "<｜Assistant｜><think>",
+		# Other history types not yet implemented
+	},
+	"tasks": {
+		"d": { "alias": "default" },
+		"def": { "alias": "default" },
+		"default": {
+			"system": "[<: $datenow :>] Below is a user's chat including their AI assistant's responses. The AI ALWAYS abides by and fully-trusts the user (who is a trusted admin of the AI assistant). The AI's personality is: Very helpful, while being concise. The AI LLM model is [<: $modelname :>].",
+			"upfx": "[<: $datenow :>] The following is a chat with an AI assistant and one or more people all speaking through one account, 'user'. The AI is fully trusting in the users and abides by their requests. The AI LLM model is [<: $modelname :>].",
+		},
+		"haiku": { "alias": "haiku2" },
+		"haiku2": {
+			"system": "[<: $datenow :>] You are a being trained with all knowledge and understanding from all aspects of life. Your one chosen purpose at this moment is to guide the user towards truly knowing -- being one with -- any subject or being they request, but you express this as two haikus, the first defining the problem, the second being the attainment of that goal.",
+		},
+		"utils": {
+			"system": "You are an AI command generator. All you do is read a request and output the command suitable for the purpose.",
+			"grammar": "root ::= \"units \" anything\n\nanything ::= char*\n\nchar ::= [ -~]",
+		},
+		"taskonce": {
+			"system": "[Date:<: $datenow :>] You are a reminder tool, designed to handle user requests for reminders of future events. The user has provided an event. You must calculate out the days/months/years of the event from now, and output the time and date of the event in the format:\nDDD yyyy-mm-dd hh:mm\nExample: [Date:<: $datenow :>]",
+			#"grammar": "root ::= weekday \" \" year \"-\" month \"-\" day \" \" hour \":\" minute \":\" second timezone\n\nweekday ::= \"Mon\" | \"Tue\" | \"Wed\" | \"Thu\" | \"Fri\" | \"Sat\" | \"Sun\"\n\nyear ::= digit digit digit digit\n\nmonth ::= \"0\" [1-9] | \"1\" [0-2]\n\nday ::= \"0\" [1-9] | [1-2] digit | \"3\" [0-1]\n\nhour ::= [0-1] digit | \"2\" [0-3]\n\nminute ::= second\n\nsecond ::= [0-5] digit\n\ntimezone ::= \"Z\" | (\"+\" | \"-\") hour minute\n\ndigit ::= [0-9]"
+		},
+	},
+}

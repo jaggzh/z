@@ -3,8 +3,10 @@
 
 use v5.34;
 use warnings;
+# use autobox;  # for ->%* and ->@* when debugging. Easier.
+# use autobox::Core;
 use bansi;	# Include for term colors (Like $bred, $bgblu, $yel, $bro, ..., $rst to reset.
-use Getopt::Lucid qw(:all);
+use Getopt::Long::Descriptive;
 use POSIX qw(strftime);
 use Text::Xslate;
 use LWP::UserAgent;
@@ -27,10 +29,11 @@ use File::Compare;
 use Carp 'confess';
 use Term::ReadLine;
 use Term::ReadLine::Gnu qw(RL_PROMPT_START_IGNORE RL_PROMPT_END_IGNORE);
+no warnings 'once';
 my $C_IGN_S = RL_PROMPT_START_IGNORE;
 my $C_IGN_E = RL_PROMPT_END_IGNORE;
 
-$SIG{__DIE__} = sub { confess @_ };
+# $SIG{__DIE__} = sub { confess @_ };
 
 # no autovivification;
 # use autobox::Core;
@@ -85,100 +88,118 @@ my $clr_notice_bg=a24bg(30,155,30);
 my $clr_notice_fg=$whi;
 my $oumask = 0077; # This should be overwritten when we set umask later
 
-my @specs = (
-	Switch("--help|-h")->doc("This beautiful help"),
-	Counter("--verbose|-v")->default(0)->doc("Increase verbosity"),
-	Counter("--verbose_resp|--vr")->doc("Verbose response data"),
-	Switch("--dry_run|-n")->doc("Dry run (no longer available)"),
-    List("--image|--img")->doc("Provide images (in prompt, use [img] or, for multiple, use [img-1] .. [img-N])"),
-    Switch("--clipboard|--cb")->doc("Use clipboard content"),
-	Switch("--interactive|--int|-i")->doc("Interactive"),
-	Switch("--raw|-r")->doc("Don't do any processing (so tokens might come out live)"),
-	Switch("--token_count|-T")->doc("Count tokens in the input text"),
-	Switch("--ctx")->doc("Get running model n_ctx (query not used)"),
-	Switch("--metadata")->doc("Get running model metadata info"),
-	Switch("--tokens_full")->doc("Output full tokens with parts"),
-	Param("--n_predict|-P")->default($def_npredict)->doc("Limit prediction length to N tokens"),
-	Switch("--play_user|--pu")->doc("Play user text"),
-	Switch("--play_resp|--pr")->doc("Play response text"),
-	Param("--probs")->doc("Return probabilities for top N tokens (default: disabled (0))"),
-	Switch("--no-color|-C")->doc("Disable color (used in interactive mode)"),
-	Switch("--no-cache|-u")->doc("Disable cache (ignore. unused)"),
-	Switch("--wipe|-w")->doc("Wipe prompt history"),
-	Switch("--no-history|-H")->doc("Do not use history. No load, no store."),
-	Switch("--input-only|-I")->doc("Use history BUT DO NOT WRITE TO IT."),
-	Switch("--edit-hist|--eh|-E")->doc("Edit history (will choose the current suffix)"),
-	Param("--history-input-file|--hin")->doc("File for INPUT-only history (not modified)"),
-	Param("--grammar|-g")->doc("Force a grammar"),
-	Param("--tasktype|-t")->doc("Use this task name (default: $def_tasktype)"),
-	Param("--storage-sfx|--sfx|-s")->doc("Make the history unique"),
-	Switch("--store|-S")->doc("Store any given -t/--tasktype or -s/--sfx. Note that sfx is stored globally for this user."),
-	Switch("--def|-d")->doc("Set default (probably general-purpose) task name (TEMPORARY) (short for -t $def_tasktype)."),
-	Switch("--default-all|-D")->doc("CLEAR (default AND STORE) taskname AND suffix (like -t $def_tasktype --sfx '' -S)"),
-	Param("--system")->doc("Set a system prompt (overrides -t)"),
-	Switch("--list-tasktypes|-L")->doc("List available tasktype names"),
-	Switch("--thought|--think")->doc("Do not removing reasoning sections in reasoning models"),
+my ($opt, $usage) = describe_options(
+    'z %o [prompt]',
+    [ 'help|h',             "This beautiful help" ],
+    [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
+    [ 'verbose_resp|vr+',   "Verbose response data" ],
+    [ 'dry_run|n',          "Dry run (no longer available)" ],
+    [ 'image|img:s@',       "Provide images (in prompt, use [img] or, for multiple, use [img-1] .. [img-N])" ],
+    [ 'clipboard|cb',       "Use clipboard content" ],
+    [ 'interactive|int|i',  "Interactive" ],
+    [ 'echo1|e',            "Echo back *initial prompt* (useful when piping from editor)" ],
+    [ 'raw|r',              "Don't do any processing (so tokens might come out live)" ],
+    [ 'token_count|T',      "Count tokens in the input text" ],
+    [ 'ctx',                "Get running model n_ctx (query not used)" ],
+    [ 'metadata',           "Get running model metadata info" ],
+    [ 'tokens_full',        "Output full tokens with parts" ],
+    [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
+    [ 'play_user|pu',       "Play user text" ],
+    [ 'play_resp|pr',       "Play response text" ],
+    [ 'probs:s',            "Return probabilities for top N tokens (default: disabled (0))" ],
+    [ 'no-color|nc',        "Disable color (used in interactive mode)" ],
+    [ 'no-cache|u',         "Disable cache (ignore. unused)" ],
+    [ 'grammar|g=s',        "Force a grammar" ],
+    [ 'tasktype|t=s',       "Use this task name (default: $def_tasktype)" ],
+    [ 'wipe|w',             "Wipe prompt history" ],
+    [ 'no-history|H',       "Do not use history. No load, no store." ],
+    [ 'input-only|I',       "Use history BUT DO NOT WRITE TO IT." ],
+    [ 'edit-hist|eh|E',     "Edit history (will choose the current suffix)" ],
+    [ 'history-input-file|hin=s', "File for INPUT-only history (not modified)" ],
+    [ 'storage-sfx|sfx|s=s', "Make the history unique" ],
+    [ 'store|S',            "Store any given -t/--tasktype or -s/--sfx. Note that sfx is stored globally for this user. (Otherwise, -t and --sfx only last for this one interactive session or single query. If -S is used, any -t or --sfx on the current command-line are stored for the next query/session.)" ],
+    [ 'default|def|d',              "Set default (probably general-purpose) task name (TEMPORARY) (short for -t $def_tasktype). Using a --sfx or -t anywhere on the cli will first default all, then set the specified option (use -D instead of -d to store it though)." ],
+    [ 'default-all|D',      "CLEAR (default AND STORE) taskname AND suffix (like -t $def_tasktype --sfx '' -S). Using a --sfx or -t anywhere on the cli will first default all, then set the specified option, then store." ],
+    [ 'system=s',           "Set a system prompt (overrides -t)" ],
+    [ 'list-tasktypes|L',   "List available tasktype names" ],
+    [ 'thought|think',      "Do not removing reasoning sections in reasoning models" ],
+    [],
+    [ 'Conversation/History Options:' ],
+    # New planned option: Leave alone for now:
+    [ 'write-last|conv1|c1=s', "Conv: Write out last message to conv history directory. - means stdout. -filename will write to filename (full paths allowed)." ],
 );
 
-# my $opts = Getopt::Lucid->getopt(\@specs, { strict=>1 });
 @ARGV = map { decode('UTF-8', $_) } @ARGV;
-my $opts = Getopt::Lucid->new( \@specs, { strict=>1 });
-$opts->getopt();
-if ($opts->get_help) { usage(); }
-my $input_only = $opts->get_input_only;
 
-$verbose = $opts->get_verbose;
-$verbose_resp = $opts->get_verbose_resp;
-
-my $tasktype;
-my $storage_sfx;
+if ($opt->help) { print($usage->text), exit; }
+my $opt_input_only = $opt->input_only;
+my $opt_no_history = $opt->no_history;
+$verbose = $opt->verbose;
+$verbose_resp = $opt->verbose_resp;
 my @no_query_ok_msgs;
+my $opt_default = $opt->default;
+my $opt_default_all = $opt->default_all;
+my $tasktype = $opt->tasktype;
+my $opt_sfx = $opt->storage_sfx;
 
 ## STORED STUFF: TWO USER-REQUESTED STORAGE ROUTES:
 ##  -D (default all)
 ##  -S (store whichever are specified on commandline)
-if ($opts->get_default_all) { # User wants to DEFAULT EVERYTHING
-	$opts->set_storage_sfx($def_sfx);
-	$opts->set_tasktype($def_tasktype);
-	sfx_prior_save($def_sfx);
-	tasktype_prior_save($def_tasktype, sfx=>$def_sfx);
-	$storage_sfx = $def_sfx;
-	$tasktype = $def_tasktype;
-	push @no_query_ok_msgs, "Defaulted tasktype";
-} elsif ($opts->get_store) { # User wants to STORE CLI OPTIONS
-	se "Storing provided options..." if $verbose;
-	if ($opts->get_storage_sfx // 0) { # If provided sfx to store
-		$storage_sfx = lc $opts->get_storage_sfx;
-		se "  Storing suffix ($storage_sfx)." if $verbose;
-		sfx_prior_save($storage_sfx);
-	} else { # If they didn't give sfx, then we don't store it.
-		# Instead, load a stored one if it exists.
-		$storage_sfx = sfx_prior_load() // $def_sfx;
-		$opts->set_storage_sfx($storage_sfx);
-	}
-	# If they provided a tasktype, store it:
-	if ($opts->get_tasktype // 0) {
-		$tasktype = lc $opts->get_tasktype;
-		tasktype_prior_save($tasktype, sfx=>$storage_sfx);
-	} else { # If not, load prior if it exists
-		$tasktype = tasktype_prior_load(sfx=>$storage_sfx) // $def_tasktype;
-		$opts->set_tasktype($tasktype);
-	}
-	push @no_query_ok_msgs, "Stored these CLI options (suffix, tasktype, etc.)";
-} else { # User has not forced defaults and not requested to store
-	$storage_sfx = lc ($opts->get_storage_sfx
-		// sfx_prior_load() // $def_sfx);
-	$tasktype = ($opts->get_tasktype
-		// tasktype_prior_load(sfx=>$storage_sfx)
-		// $def_tasktype);
+
+# User wants to DEFAULT EVERYTHING
+if ($opt_default || $opt_default_all) {
+	# Accept CLI overrides of defaults too:
+    $opt_sfx = $opt_sfx // $def_sfx;
+    $tasktype = $opt->{tasktype} = $tasktype // $def_tasktype;
 }
 
-my @images = $opts->get_image;  # Array of image paths
-my $use_clipboard = $opts->get_clipboard;
-my $opt_n_predict = $opts->get_n_predict;
-my $opt_n_probs = $opts->get_probs;
-my $opt_system = $opts->get_system;
-my $intmode = $opts->get_interactive;
+# User wants to STORE the defaults + overries
+my $stored_opts = 0;
+if ($opt_default_all) {
+	if ($verbose) {
+		se "Storing all defaults w/ overrides...";
+		se "       sfx: $opt_sfx";
+		se "  tasktype: $tasktype";
+	}
+    sfx_prior_save($opt_sfx);
+    $stored_opts = 1;
+    tasktype_prior_save($tasktype, sfx=>$opt_sfx);
+    push @no_query_ok_msgs, "Defaulted tasktype";
+} elsif ($opt->store) { # User wants to STORE *ONLY* CLI OPTIONS
+    se "Storing only provided options..." if $verbose;
+    if ($opt->storage_sfx // 0) { # If provided sfx to store
+        $opt_sfx = lc $opt->storage_sfx;
+        se "  Storing suffix ($opt_sfx)." if $verbose;
+        sfx_prior_save($opt_sfx);
+    } else { # If they didn't give sfx, then we don't store it.
+        # Instead, load a stored one if it exists.
+        $opt_sfx = sfx_prior_load() // $def_sfx;
+        $opt->{storage_sfx} = $opt_sfx;
+    }
+    # If they provided a tasktype, store it:
+    if ($opt->tasktype // 0) {
+        $tasktype = lc $opt->tasktype;
+        tasktype_prior_save($tasktype, sfx=>$opt_sfx);
+    } else { # If not, load prior if it exists
+        $tasktype = tasktype_prior_load(sfx=>$opt_sfx) // $def_tasktype;
+        $opt->{tasktype} = $tasktype;
+    }
+    push @no_query_ok_msgs, "Stored these CLI options (suffix, tasktype, etc.)";
+} else { # User has not forced defaults and not requested to store
+    $opt_sfx = lc ($opt_sfx // sfx_prior_load() // $def_sfx);
+    $tasktype = ($opt->tasktype
+        // tasktype_prior_load(sfx=>$opt_sfx)
+        // $def_tasktype);
+}
+
+my @images = $opt->image // ();  # Array of image paths
+my @image_data;
+my $use_images;
+my $use_clipboard = $opt->clipboard;
+my $opt_n_predict = $opt->n_predict;
+my $opt_n_probs = $opt->probs;
+my $opt_system = $opt->system;
+my $intmode = $opt->interactive;
 my $uprompt;
 
 if (@ARGV) {
@@ -190,33 +211,40 @@ if (@ARGV) {
 		$uprompt = join(' ', @ARGV);
 	}
 }
+if (defined $uprompt) {
+	if ($opt->echo1) {
+		print $uprompt, ($uprompt !~ /\n$/ ? "\n" : '');
+	}
+}
 
 $HISTFILE = sprintf("$HISTFILE",
-	($storage_sfx // $def_sfx) eq '' ? '' : "_$storage_sfx");
+	($opt_sfx // $def_sfx) eq '' ? '' : "_$opt_sfx");
 
 sel 1, "$clr_notice_bg${clr_notice_fg}Using history file:$rst $HISTFILE$rst";
 
 se "tasktype: {$tasktype}" if $verbose;
-se "     sfx: {$storage_sfx}" if $verbose;
+se "     sfx: {$opt_sfx}" if $verbose;
 se "histfile: {$HISTFILE}" if $verbose;
 
-if ($opts->get_edit_hist) {
-	die "Input-only was selected (-I). Editing it makes no sense."
-		if $input_only;
-	$oumask = umask 0177;
-	my ($fh, $tfn) = tempfile("zhist-edit-XXXXXX", SUFFIX=>".json", UNLINK=>1, TMPDIR=>1);
-	copy($HISTFILE, $fh) or die "Copy failed: $!";
-	close $fh;
-	se "Editing history file $HISTFILE -> $tfn";
-	system('vim', '--', $tfn);
-	if (!compare($HISTFILE, $tfn)) {
-		se "No change.";
-	} else {
-		copy($tfn, $HISTFILE) or die "Failed to save history: $!";
-		se "History modified ($HISTFILE).";
-	}
-	umask $oumask;
-	exit;
+if ($opt->edit_hist) {
+    die "Input-only was selected (-I). Editing it makes no sense."
+        if $opt_input_only;
+    die "No-history was selected (-H). Editing it makes no sense."
+        if $opt_no_history;
+    $oumask = umask 0177;
+    my ($fh, $tfn) = tempfile("zhist-edit-XXXXXX", SUFFIX=>".json", UNLINK=>1, TMPDIR=>1);
+    copy($HISTFILE, $fh) or die "Copy failed: $!";
+    close $fh;
+    se "Editing history file $HISTFILE -> $tfn";
+    system('vim', '--', $tfn);
+    if (!compare($HISTFILE, $tfn)) {
+        se "No change.";
+    } else {
+        copy($tfn, $HISTFILE) or die "Failed to save history: $!";
+        se "History modified ($HISTFILE).";
+    }
+    umask $oumask;
+    exit;
 }
 
 sub sfx_prior_load {
@@ -241,7 +269,7 @@ sub sfx_prior_save {
 }
 sub tasktype_prior_load {
 	my %fopts=@_;
-	my $sfx = $fopts{sfx} // '';
+	my $sfx = $opt_sfx // '';
 	my $fn = sprintf($TASKTYPE_FN_FMT, $sfx eq '' ? '' : "_$sfx");
 	my $s;
 	eval { $s = read_text($fn); chomp $s; };
@@ -250,7 +278,7 @@ sub tasktype_prior_load {
 }
 sub tasktype_prior_save {
 	my $tasktype = shift; my %fopts=@_;
-	my $sfx = $fopts{sfx} // '';
+	my $sfx = $opt_sfx // '';
 	$sfx =~ s#[/]#_#g;
 	$tasktype =~ s#[/]#_#g;
 	my $prior_str = tasktype_prior_load(sfx=>$sfx);
@@ -259,7 +287,7 @@ sub tasktype_prior_save {
 		return;
 	}
 	my $fn = sprintf($TASKTYPE_FN_FMT, $sfx eq '' ? '' : "_$sfx");
-	se "    Saving tasktype ($tasktype) to $fn" if $verbose;
+	se "    Saving tasktype ($tasktype) to fn '$fn'" if $verbose;
 	$oumask = umask 0177;
 	write_text($fn, $tasktype);
 	umask $oumask;
@@ -293,14 +321,13 @@ sub safe_decode_json_file {
     return $parsed;
 }
 
-
 ## CONVERSATION HISTORY early wiping:
 my $conversation_history = [];
-if ($opts->get_wipe) {
-	$conversation_history = [];
-
-	if ($input_only) {
+if ($opt->wipe) {
+	if ($opt_input_only) {
 		sel 1, "Input-only (-I) specified. Wiping only in memory.";
+	} elsif ($opt_no_history) {
+		sel 1, "No-history (-H) specified. Wiping only in memory.";
 	} else {
 		$oumask = umask 0177;
 		write_text($HISTFILE, encode_json($conversation_history));
@@ -310,7 +337,7 @@ if ($opts->get_wipe) {
 	}
 }
 
-if ($opts->get_token_count) {
+if ($opt->token_count) {
 	my $input_text = $uprompt // '';
 	my $token_count;
 	if (!defined $input_text || $input_text eq '') {
@@ -326,7 +353,7 @@ if ($opts->get_token_count) {
 	exit;
 }
 
-if ($opts->get_tokens_full) {
+if ($opt->tokens_full) {
 	my $input_text = $uprompt // '';
 	if (!defined $input_text || $input_text eq '') {
 		se "${bred}No input text provided for token counting. See -h$rst";
@@ -343,10 +370,10 @@ if ($opts->get_tokens_full) {
 }
 
 ## CONVERSATION HISTORY
-if (!$opts->get_wipe || $opts->get_history_input_file) {
+if (!$opt->wipe || $opt->history_input_file) {
 	my $history_file_input_only;
-	if ($opts->get_history_input_file) {
-		$history_file_input_only = $opts->get_history_input_file;
+    if ($opt->history_input_file) {
+        $history_file_input_only = $opt->history_input_file;
 	} else {
 		$history_file_input_only = $HISTFILE;
 	}
@@ -361,7 +388,6 @@ if (!$opts->get_wipe || $opts->get_history_input_file) {
 		}
 	}
 }
-
 
 sub generate_history {
 	my ($tplspec, $conversation_history, $uprompt_filled) = @_;
@@ -392,7 +418,6 @@ sub generate_history {
 				$history_text .= $resp_part;
 			}
 		}
-
 	}
 	%xslate_opts = ( user => $uprompt_filled, );
 	$user_part = $tplxs->render_string($tplinst, \%xslate_opts);
@@ -419,9 +444,10 @@ Examples:
 	echo "Tell me ..." | z -t love -  # Input securely from stdin
 Options:
 EOT
-	print $opts->usage();
+    print $usage->text;
 	exit;
 }
+
 sub se { say STDERR @_; }
 sub sel { my $l=shift; say STDERR @_ if $verbose >= $l; }
 sub pe { print STDERR @_; }
@@ -429,6 +455,7 @@ sub pel { my $l=shift; print STDERR @_ if $verbose >= $l; }
 sub sewarn { say STDERR "$bgred$yel", @_, $rst; }
 
 my $fn_config = glob("~/.config/zchat.json");
+my $dir_convs = glob("~/.local/share/zchat");
 
 ##  Example json file (sysprompts.json):
 #{
@@ -443,31 +470,57 @@ my $fn_config = glob("~/.config/zchat.json");
 #		}
 #	}
 #}
-
 # {
 #	'sysprompts': {
 #	}
 # );
+
 my $cfg=load_json_file($fn_config);
 my $props = http_get_props();
 my $n_ctx = get_model_ctx();
-if ($opts->get_ctx) {
+if ($opt->ctx) {
 	say $n_ctx;
 	exit;
 }
+
 sub show_model_meta {
 	my $props = shift;
 	for my $k (keys %$props) {
 		say "$k -> $$props{$k}";
 	}
 }
-if ($opts->get_metadata) { show_model_meta($props); exit; }
 
+if ($opt->metadata) { show_model_meta($props); exit; }
 $HISTLEN_TOKENS = $n_ctx;
-if (!$intmode || $opts->get_no_color) {
+if (!$intmode || $opt->no_color) {
 	$clr_user='';
 	$clr_sys='';
 }
+
+# Handle --clipboard option (check if it's an image or text)
+if ($use_clipboard) {
+    my $clip_data = Clipboard->paste;
+    
+    if ($clip_data =~ /^\xFF\xD8/) {  # Detect JPEG binary data
+        my $image_id = (@image_data) ? "img-" . (scalar(@image_data) + 1) : 'img';
+        my $base64_image = encode_base64($clip_data);
+        push @image_data, { id => $image_id, data => $base64_image };
+        $use_images = 1;
+    } elsif ($clip_data =~ /^\p{IsPrint}/) {  # Detect plain text
+    	if (defined $uprompt) {
+			se "${bred}ERROR: --cb and a query are not currently compatible (we've not chosen how to join them.$rst";
+			exit 22;
+		}
+        $uprompt = encode_utf8($clip_data);  # Use as the prompt text
+    } else {
+        se "${bred}ERROR: Unsupported clipboard content. Only text and images are supported.$rst";
+        exit 22;
+    }
+} elsif (@images) {
+	$use_images = 1;
+}
+
+
 if (!$intmode && !defined $uprompt) {
 	if (!@no_query_ok_msgs) {
 		se "${bred}No query provided. See -h or use -i interactive mode$rst";
@@ -478,6 +531,7 @@ if (!$intmode && !defined $uprompt) {
 	}
 	exit 1;
 }
+
 sub d { defined $_[0] }
 sel 1, "    Task type: $tasktype";
 sel 1, "  User prompt: $uprompt" if d($uprompt);
@@ -487,12 +541,14 @@ my $server_modelname = get_modelname_from_props($props);
 sel 1, "Server Model: $server_modelname";
 my $modelspec = get_modelspec_from_config(cfg=>$cfg, file=>$server_modelname);
 my $sani_modelname = sanitize_model_name($server_modelname);
+
 sub sanitize_model_name {
 	my $name = shift;
 	$name =~ s,^.*/,,;
 	$name =~ s,\.*?$,,;
 	$name;
 }
+
 sel 1, "Sanitized model name: $sani_modelname";
 
 if (!defined $modelspec) {
@@ -577,15 +633,14 @@ if (exists $cfg->{tasks}{$tasktype}) {
 	}
 }
 sel 1, "Task spec: $bgblu$yel$taskspec$rst";
-
-if ($opts->get_grammar) {
+if ($opt->grammar) {
 	# $taskspec->{grammar} = encode_json($opts->get_grammar);
-	$taskspec->{grammar} = $opts->get_grammar;
+    $taskspec->{grammar} = $opt->grammar;
 	sel 1, "User-specified grammar: $bgblu$yel$$taskspec{grammar}$rst";
 }
 
 # Ensure multimodal support if images are used
-if (@images || $use_clipboard) {
+if (@images || $use_images) {
     unless ($modelspec->{'mm'}) {
         se "${bred}ERROR: Multimodal model required for image support.$rst";
         exit 22;  # EINVAL: Invalid argument
@@ -593,7 +648,6 @@ if (@images || $use_clipboard) {
 }
 
 # Handle --image option
-my @image_data;
 if (@images) {
     for my $index (0..$#images) {
         my $image_path = $images[$index];
@@ -614,22 +668,6 @@ if (@images) {
         my $ora=a24fg(255,128,30);
         say "${ora}Attaching image ${whi}$image_id$ora, Base64 len: " . length($base64_image);
         push @image_data, { id => $image_id, data => $base64_image };
-    }
-}
-
-# Handle --clipboard option (check if it's an image or text)
-if ($use_clipboard) {
-    my $clip_data = Clipboard->paste;
-    
-    if ($clip_data =~ /^\xFF\xD8/) {  # Detect JPEG binary data
-        my $image_id = (@image_data) ? "img-" . (scalar(@image_data) + 1) : 'img';
-        my $base64_image = encode_base64($clip_data);
-        push @image_data, { id => $image_id, data => $base64_image };
-    } elsif ($clip_data =~ /^\p{IsPrint}/) {  # Detect plain text
-        $uprompt = encode_utf8($clip_data);  # Use as the prompt text
-    } else {
-        se "${bred}ERROR: Unsupported clipboard content. Only text and images are supported.$rst";
-        exit 22;
     }
 }
 
@@ -680,7 +718,6 @@ if (@image_data) {
     }
 }
 
-
 if (defined $opt_system) {
 	$taskspec = {
 		system=>$opt_system,
@@ -697,32 +734,77 @@ sub term_reset_and_accept_line {
     print "$rst"; # Should only be if in intmode
     $term->call_function("accept-line", $count, $key);
 }
+
+my $termattribs;
 if ($intmode) {
 	$term = Term::ReadLine->new("z") or die "Cannot create Term::ReadLine object";
     $term->ReadHistory($READLINE_HISTFILE) if -e $HISTFILE;
-    my $termattribs = $term->Attribs();
+	$termattribs = $term->Attribs();
 	$term->add_defun("accept-line", \&term_reset_and_accept_line, ord("\n"));
-	$term->add_defun("accept-line", \&term_reset_and_accept_line, ord("\r"));
+	# $term->add_defun("accept-line", \&term_reset_and_accept_line, ord("\r"));
+	# # $term->parse_and_bind('"\\C-x@s": win_enter_hook');
+	# $term->parse_and_bind('"\\C-x": win_enter_hook');
+
+	# $term->parse_and_bind('"\\e[99~": win-enter-hook');
+	$term->add_defun('win_enter_hook', \&handle_win_enter, ord("\x{18}"));
 	# $term->bind_key(ord("\r"), "accept-line"); # This method didn't work
 	# $term->bind_key(ord("a"), "accept-line");
 }
+
+sub handle_win_enter {
+	say "We received a ^X";
+	if (defined $termattribs) {
+		my $in = $termattribs->{'instream'};
+
+		my $next1 = getc($in);
+		my $next2 = getc($in);
+		my $next3 = getc($in);
+
+		$term->add_defun('win_enter_hook', \&handle_win_enter, ord("\x18"));
+
+		if (defined $next3 && defined $next1 && defined $next2 &&
+				$next1 eq "\n" && $next2 eq '@' && $next3 eq 's') {
+			say "We got a subsequent ^X 13 \@s sequence";
+			return 0;
+		} elsif (defined $next1 && defined $next2 && $next1 eq '@' && $next2 eq 's') {
+			# say "We received the ^X\@s";
+			my $buf = $termattribs->{'line_buffer'};
+			my $point = $termattribs->{'point'};
+
+			# Insert a newline at the cursor position
+			substr($buf, $point, 0) = "\n";
+			$point++;
+
+			# Update them back into the attribs hash
+			$termattribs->{'line_buffer'} = $buf;
+			$termattribs->{'point'} = $point;
+
+			return 0;
+		}
+		say "We did not see the next chars.";
+		warn "Got next1=".ord($next1)." (".(defined $next1 ? $next1 : 'undef').")\n";
+		warn "Got next2=".ord($next2)." (".(defined $next2 ? $next2 : 'undef').")\n";
+		return 0;
+	}
+}
+
 
 while (1) {
     # If initial query (cli or piped), process it first.
     if (defined $uprompt and $uprompt ne '') {
 			# Switch("--play_user|--pu")->doc("Play user text"),
 			# Switch("--play_resp|--pr")->doc("Play response text"),
-		tts_str($uprompt) if $opts->get_play_user;
+        tts_str($uprompt) if $opt->play_user;
 		print $clr_sys if $intmode;
         my $assistant_response = complete_with_mojo(
             tplspec   => $tplspec,
             taskspec  => $taskspec,
             modelspec => $modelspec,
             uprompt   => $uprompt,
-            args      => $opts,
+            args      => $opt,
         );
 		say $rst if $intmode;
-		tts_str($assistant_response) if $opts->get_play_resp;
+        tts_str($assistant_response) if $opt->play_resp;
     }
 
     if ($intmode) { # If interactive mode...
@@ -787,7 +869,7 @@ sub format_prompt {
 
 	my $history_text = generate_history(
 		$tplspec,
-		$opts->get_no_history ? [] : $conversation_history,
+        $opt_no_history ? [] : $conversation_history,
 		$uprompt);
 
 	if (!$system) {
@@ -841,7 +923,7 @@ sub complete_with_mojo {
 	my $system = $modelspec->{system} // 1;
 	my $grammar = $taskspec->{grammar} // '';
 	my $rm_re = $tplspec->{rm_re};
-	my $show_thought = $args->get_thought;
+    my $show_thought = $args->thought;
 	if ($$taskspec{think}) {
 		$rm_re = "(?:<think>)?.*</think>\\s*";
 	}
@@ -955,12 +1037,13 @@ sub complete_with_mojo {
 				$colorized_answer =~ s/$rm_re/$bg$whi$&$rst/s;
 				se "ANSWER WITH THOUGHT: {{$colorized_answer}}";
 			}
-			if (!$args->get_thought) {
+            if (!$args->thought) {
 				$answer =~ s/$rm_re//s;
 			}
 		}
 		print "$answer";
 	}
+	say '' if $lo_live && defined($answer) && $answer !~ /[\r\n]$/;
 	append_to_history($uprompt, $answer);
 	return $answer;
 }
@@ -999,7 +1082,7 @@ sub append_to_history {
     	$conversation_history = prune_history_array($conversation_history);
 	}
 
-	if ($input_only) {
+	if ($opt_input_only) {
 		sel 1, "NOT updating history file. (-I specified)";
 	} else {
 		my $json = JSON::XS->new->pretty(1)->utf8->
@@ -1127,7 +1210,16 @@ sub load_json_file {
 	my $jsontxt = do { local $/; <$fh> };
 	close $fh;
 	my $json = json_relaxed();
-	my $data = $json->decode($jsontxt);
+	my $data;
+	eval {
+		$data = $json->decode($jsontxt);
+	};
+	if ($@) {
+		se "Invalid json:";
+		se "  Error: $@";
+		se "  ${rst}jsontxt: {$bred$jsontxt$rst}";
+		die "Invalid json. See above.";
+	}
 	$data;
 }
 

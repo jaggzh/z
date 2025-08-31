@@ -78,7 +78,8 @@ sub load_json {
         return [] if $decoded =~ /^\s*$/;
         
         my $json = JSON::XS->new->relaxed(1);
-        return $json->decode($decoded);
+        my $result = $json->decode($decoded);
+        return ref($result) eq 'ARRAY' ? $result : [];
     };
     
     if ($@) {
@@ -176,6 +177,8 @@ sub load_history {
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
     my $history = $self->load_json($history_file);
     
+    return [] unless $history && ref($history) eq 'ARRAY';
+    
     # Convert to message format if needed
     my @messages;
     for my $entry (@$history) {
@@ -234,6 +237,7 @@ sub append_to_history {
     
     # Load existing history
     my $history = $self->load_json($history_file);
+    $history = [] unless ref($history) eq 'ARRAY';  # Ensure it's always an array ref
     
     # Add new entry
     push @$history, {

@@ -189,6 +189,11 @@ sub remove_pin {
 }
 
 # Configuration management
+sub get_preset {
+    my ($self) = @_;
+    return $self->{config}->{preset};
+}
+
 sub store_user_config {
     my ($self, %opts) = @_;
     return $self->{config}->store_user_config(%opts);

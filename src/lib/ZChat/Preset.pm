@@ -7,6 +7,7 @@ use utf8;
 use File::Spec;
 use File::Basename;
 use FindBin;
+use String::ShellQuote;
 use Text::Xslate;
 use POSIX qw(strftime);
 
@@ -15,7 +16,7 @@ sub new {
     
     my $self = {
         storage => $opts{storage} || die "storage required",
-        data_dir => $opts{data_dir} || File::Spec->catdir($FindBin::Bin, 'data', 'sys'),
+        data_dir => $opts{data_dir} || File::Spec->catdir($FindBin::Bin, '..', 'data', 'sys'),
         persona_bin => $opts{persona_bin} || 'persona',
         template_engine => undef,
     };
@@ -69,7 +70,7 @@ sub _try_config_preset {
 sub _try_data_preset {
     my ($self, $preset_name) = @_;
     
-    return undef unless -d $self->{data_dir};
+    return undef unless $self->{data_dir} && -d $self->{data_dir};
     
     # Try directory-based preset first
     my $preset_dir = File::Spec->catdir($self->{data_dir}, $preset_name);
@@ -90,12 +91,14 @@ sub _try_persona_preset {
     my ($self, $preset_name, %opts) = @_;
     
     return undef if $opts{skip_persona};
+    return undef unless $self->{persona_bin};
     
     my @cmd = ($self->{persona_bin}, '--path', 'find', $preset_name);
+    my $cmd = shell_quote(@cmd);
     
     my $output;
     eval {
-        $output = `@cmd 2>/dev/null`;
+        $output = `$cmd 2>/dev/null`;
         chomp $output if defined $output;
     };
     
@@ -158,6 +161,8 @@ sub _process_preset_content {
 
 sub _render_template {
     my ($self, $template) = @_;
+    
+    return '' unless defined $template && $template ne '';
     
     my %template_vars = (
         datenow => $self->_make_datenow(),
@@ -272,6 +277,7 @@ sub get_preset_metadata {
     my ($self, $preset_name) = @_;
     
     return {} unless defined $preset_name;
+    return {} unless $self->{data_dir} && -d $self->{data_dir};
     
     my $preset_dir = File::Spec->catdir($self->{data_dir}, $preset_name);
     return {} unless -d $preset_dir;

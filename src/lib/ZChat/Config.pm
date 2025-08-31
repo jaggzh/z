@@ -1,0 +1,213 @@
+package ZChat::Config;
+
+use v5.34;
+use warnings;
+use utf8;
+
+use File::Spec;
+use File::Path qw(make_path);
+
+sub new {
+    my ($class, %opts) = @_;
+    
+    my $self = {
+        storage => $opts{storage} || die "storage required",
+        session_name => $opts{session_name} // '',
+        effective_config => {},
+    };
+    
+    bless $self, $class;
+    return $self;
+}
+
+sub load_effective_config {
+    my ($self, %cli_opts) = @_;
+    
+    my $config = {};
+    
+    # 1. System defaults
+    my $system_defaults = $self->_get_system_defaults();
+    %$config = (%$config, %$system_defaults);
+    
+    # 2. User global config
+    my $user_config = $self->_load_user_config();
+    %$config = (%$config, %$user_config) if $user_config;
+    
+    # 3. Session config  
+    if ($self->{session_name}) {
+        my $session_config = $self->_load_session_config();
+        %$config = (%$config, %$session_config) if $session_config;
+    }
+    
+    # 4. CLI overrides (runtime only)
+    for my $key (qw(preset system_prompt system_file)) {
+        $config->{$key} = $cli_opts{$key} if defined $cli_opts{$key};
+    }
+    
+    $self->{effective_config} = $config;
+    return $config;
+}
+
+sub _get_system_defaults {
+    return {
+        preset => 'default',
+        session => '',
+        pin_defaults => {
+            role => 'system',
+            method => 'concat',
+        },
+        pin_limits => {
+            system => 50,
+            user => 50,
+            assistant => 50,
+        },
+        pin_shims => {
+            user => '<pin-shim/>',
+            assistant => '<pin-shim/>',
+        },
+    };
+}
+
+sub _load_user_config {
+    my ($self) = @_;
+    
+    my $config_dir = $self->_get_config_dir();
+    my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
+    
+    return $self->{storage}->load_yaml($user_config_file);
+}
+
+sub _load_session_config {
+    my ($self) = @_;
+    
+    return undef unless $self->{session_name};
+    
+    my $session_dir = $self->_get_session_dir();
+    my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
+    
+    return $self->{storage}->load_yaml($session_config_file);
+}
+
+sub store_user_config {
+    my ($self, %opts) = @_;
+    
+    my $config_dir = $self->_get_config_dir();
+    make_path($config_dir) unless -d $config_dir;
+    
+    my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
+    
+    # Load existing config
+    my $existing = $self->_load_user_config() || {};
+    
+    # Update with new values
+    for my $key (qw(preset session)) {
+        if (defined $opts{$key}) {
+            $existing->{$key} = $opts{$key};
+        }
+    }
+    
+    return $self->{storage}->save_yaml($user_config_file, $existing);
+}
+
+sub store_session_config {
+    my ($self, %opts) = @_;
+    
+    return undef unless $self->{session_name};
+    
+    my $session_dir = $self->_get_session_dir();
+    make_path($session_dir) unless -d $session_dir;
+    
+    my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
+    
+    # Load existing config
+    my $existing = $self->_load_session_config() || {};
+    
+    # Add created timestamp if new
+    $existing->{created} = time() unless exists $existing->{created};
+    
+    # Update with new values
+    for my $key (qw(preset system_prompt system_file)) {
+        if (defined $opts{$key}) {
+            $existing->{$key} = $opts{$key};
+        }
+    }
+    
+    return $self->{storage}->save_yaml($session_config_file, $existing);
+}
+
+sub _get_config_dir {
+    my ($self) = @_;
+    
+    my $home = $ENV{HOME} || die "HOME environment variable not set";
+    return File::Spec->catdir($home, '.config', 'zchat');
+}
+
+sub _get_session_dir {
+    my ($self) = @_;
+    
+    return undef unless $self->{session_name};
+    
+    my $config_dir = $self->_get_config_dir();
+    my @session_parts = split('/', $self->{session_name});
+    
+    return File::Spec->catdir($config_dir, 'sessions', @session_parts);
+}
+
+sub get_effective_config {
+    my ($self) = @_;
+    return $self->{effective_config};
+}
+
+# Convenience methods for common config access
+sub get_preset {
+    my ($self) = @_;
+    return $self->{effective_config}->{preset};
+}
+
+sub get_pin_defaults {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_defaults} || {};
+}
+
+sub get_pin_limits {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_limits} || {};
+}
+
+sub get_pin_shims {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_shims} || {};
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+ZChat::Config - Configuration management with precedence chain
+
+=head1 SYNOPSIS
+
+    use ZChat::Config;
+    
+    my $config = ZChat::Config->new(
+        storage => $storage,
+        session_name => "myproject/analysis"
+    );
+    
+    # Load effective configuration (system → user → session → CLI)
+    my $effective = $config->load_effective_config(
+        preset => "coding",  # CLI override
+    );
+    
+    # Store configurations
+    $config->store_user_config(preset => "default");
+    $config->store_session_config(preset => "coding");
+
+=head1 DESCRIPTION
+
+Handles configuration loading and storage with proper precedence:
+system defaults → user config → session config → CLI overrides
+
+=cut

@@ -18,15 +18,12 @@ sub new {
     my $persona_bin = $opts{persona_bin};
     $persona_bin = 'persona' unless defined $persona_bin && $persona_bin ne '';
     
-    se "Here: $persona_bin";
     my $self = {
         storage => ($opts{storage} // die "storage required"),
         data_dir => ($opts{data_dir} // File::Spec->catdir($FindBin::Bin, '..', 'data', 'sys')),
         persona_bin => $persona_bin,
         template_engine => undef,
     };
-    se $self->{persona_bin} . " -- this is not defined";
-    $DB::single=1;
     
     bless $self, $class;
     
@@ -61,8 +58,6 @@ sub resolve_preset {
     }
     
     # Try persona command
-    se "We r here: $$self{persona_bin}";
-    $DB::single=1;
     my $persona_content = $self->_try_persona_preset($preset_name, %opts);
     if (defined $persona_content) {
         sel(1, "Loaded preset '$preset_name' from persona command");
@@ -132,7 +127,7 @@ sub _try_persona_preset {
     }
     
     sel(2, "  persona provided:");
-    sel(2, "{{$output}}");
+    sel(2, "    {{$output}}");
     
     # Check if command succeeded and found files
     return undef if !defined $output || $output eq '';
@@ -166,7 +161,7 @@ sub _load_directory_preset {
     my $prompt_file = File::Spec->catfile($preset_dir, 'prompt');
     return undef unless -e $prompt_file && -r $prompt_file;
     
-    my $content = $self->{storage}->read_file($prompt_file);
+    my $content = read_file($prompt_file);
     return undef unless defined $content;
     
     # TODO: Load metadata from meta.yaml if needed
@@ -179,7 +174,7 @@ sub _load_directory_preset {
 sub _load_file_preset {
     my ($self, $preset_file) = @_;
     
-    my $content = $self->{storage}->read_file($preset_file);
+    my $content = read_file($preset_file);
     return undef unless defined $content;
     
     return $self->_process_preset_content($content);

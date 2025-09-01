@@ -28,12 +28,14 @@ sub complete_request {
     sel(2, "Making completion request with " . @$messages . " messages");
     
     # Debug: show message summary
-    for my $i (0..$#$messages) {
-        my $msg = $messages->[$i];
-        my $content_len = length($msg->{content});
-        sel(3, "Message $i: role=$msg->{role}, length=$content_len");
-        sel(4, "Message $i content: $msg->{content}");
-    }
+    if (get_verbose() >= 3) {
+		for my $i (0..$#$messages) {
+			my $msg = $messages->[$i];
+			my $content_len = length($msg->{content});
+			sel(3, "Message $i: role=$msg->{role}, length=$content_len");
+			sel(4, "Message $i content: $msg->{content}");
+		}
+	}
     
     # Default options
     my $temperature = $opts{temperature} || 0.7;
@@ -105,6 +107,7 @@ sub _stream_completion {
         while ($buffer =~ s/^(.*?\n)//) {
             my $line = $1;
             chomp $line;
+            sel 4, "[LLM OUTPUT] $line";
             
             next if $line =~ /^\s*$/;
             

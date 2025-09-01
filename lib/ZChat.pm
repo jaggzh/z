@@ -148,7 +148,7 @@ sub _get_system_content {
     # From system file
     if ($config->{system_file}) {
         sel(2, "Loading system file: '$config->{system_file}'");
-        my $file_content = $self->{storage}->read_file($config->{system_file});
+        my $file_content = read_file($config->{system_file});
         if ($file_content) {
             sel(2, "Got file content, length: " . length($file_content));
             $content .= "\n" . $file_content;

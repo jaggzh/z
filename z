@@ -1,5 +1,5 @@
-#!/usr/bin/perl -d
 #!/usr/bin/perl
+exec($^X, '-d', "$0", grep {!/^--debug$/} @ARGV) if grep {/^--debug$/} @ARGV;
 
 use v5.34;
 use warnings;
@@ -77,7 +77,7 @@ my ($opt, $usage) = describe_options(
     [ 'token_count|T',      "Count tokens in input text" ],
     [ 'ctx',                "Get running model n_ctx" ],
     [ 'metadata',           "Get running model metadata" ],
-    [ 'tokens_full',        "Output full tokens with parts" ],
+    [ 'tokens_full',        "Output (of input text) full tokens with parts" ],
     [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
     [ 'play_user|pu',       "Play user text with TTS" ],
     [ 'play_resp|pr',       "Play response text with TTS" ],

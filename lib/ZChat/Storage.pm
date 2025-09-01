@@ -15,7 +15,7 @@ sub new {
     my ($class, %opts) = @_;
     
     my $self = {
-        umask => 0177,  # Secure file permissions
+        umask => ($opts{umask} // 0177),  # Secure file permissions
     };
     
     bless $self, $class;

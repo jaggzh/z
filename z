@@ -391,7 +391,7 @@ if (!$intmode || $opt->no_color) {
 }
 
 # Show session info
-sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . ($zchat->{session_name} || 'default') . "$rst";
+sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . ($zchat->get_session_name() || 'default') . "$rst";
 sel 1, "${clr_notice_bg}${clr_notice_fg}Preset: " . ($zchat->get_preset() || 'none') . "$rst";
 
 # Terminal setup for interactive mode

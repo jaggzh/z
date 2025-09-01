@@ -9,6 +9,7 @@ use ZChat::Config;
 use ZChat::Storage;
 use ZChat::Pin;
 use ZChat::Preset;
+use ZChat::Utils ':all';
 
 our $VERSION = '1.0.0';
 
@@ -46,8 +47,7 @@ sub new {
     
     # Load effective configuration
     $self->_load_config(%opts);
-    $DB::single=1;
-    $self->{session_name} = $self->{config}->get_effective_session_name();
+    $self->{session_name} = $self->{config}->get_session_name();
 
     return $self;
 }
@@ -87,25 +87,40 @@ sub _build_messages {
     # 1. System message from preset/config
     my $system_content = $self->_get_system_content();
     if ($system_content) {
+        sel(2, "Adding system message, length: " . length($system_content));
+        sel(3, "System content: $system_content");
         push @messages, {
             role => 'system',
             content => $system_content
         };
+    } else {
+        sel(2, "No system content found");
     }
     
     # 2. Add pinned messages in order
     my $pinned_messages = $self->{pin_mgr}->build_message_array();
-    push @messages, @$pinned_messages;
+    if (@$pinned_messages) {
+        sel(2, "Adding " . @$pinned_messages . " pinned messages");
+        push @messages, @$pinned_messages;
+    }
     
     # 3. Add conversation history
     my $history = $self->{storage}->load_history($self->{session_name});
-    push @messages, @$history if $history;
+    if ($history && @$history) {
+        sel(2, "Adding " . @$history . " history messages");
+        push @messages, @$history;
+    } else {
+        sel(2, "No conversation history found");
+    }
     
     # 4. Add current user input
+    sel(2, "Adding user input: $user_input");
     push @messages, {
         role => 'user',
         content => $user_input
     };
+    
+    sel(2, "Built message array with " . @messages . " total messages");
     
     return \@messages;
 }
@@ -113,27 +128,45 @@ sub _build_messages {
 sub _get_system_content {
     my ($self) = @_;
     
-    my $config = $self->{config};
+    my $config = $self->{config}->get_effective_config();
     my $content = '';
     
     # From preset
     if ($config->{preset}) {
+        sel(2, "Attempting to resolve preset: '$config->{preset}'");
         my $preset_content = $self->{preset_mgr}->resolve_preset($config->{preset});
-        $content .= $preset_content if $preset_content;
+        if ($preset_content) {
+            sel(2, "Got preset content, length: " . length($preset_content));
+            $content .= $preset_content;
+        } else {
+            sel(2, "Preset resolution returned empty/undef");
+        }
+    } else {
+        sel(2, "No preset configured");
     }
     
     # From system file
     if ($config->{system_file}) {
+        sel(2, "Loading system file: '$config->{system_file}'");
         my $file_content = $self->{storage}->read_file($config->{system_file});
-        $content .= "\n" . $file_content if $file_content;
+        if ($file_content) {
+            sel(2, "Got file content, length: " . length($file_content));
+            $content .= "\n" . $file_content;
+        } else {
+            sel(2, "System file read returned empty/undef");
+        }
     }
     
     # From direct system prompt
     if ($config->{system_prompt}) {
+        sel(2, "Using direct system prompt, length: " . length($config->{system_prompt}));
         $content .= "\n" . $config->{system_prompt};
     }
     
-    return $content || undef;
+    my $final_content = $content || undef;
+    sel(2, $final_content ? "Final system content length: " . length($final_content) : "No final system content");
+    
+    return $final_content;
 }
 
 sub _manage_context {
@@ -191,8 +224,14 @@ sub remove_pin {
 # Configuration management
 sub get_preset {
     my ($self) = @_;
-    return $self->{config}->{preset};
+    return $self->{config}->get_preset();
 }
+
+sub get_session_name {
+    my ($self) = @_;
+    return $self->{config}->get_session_name();
+}
+
 
 sub store_user_config {
     my ($self, %opts) = @_;

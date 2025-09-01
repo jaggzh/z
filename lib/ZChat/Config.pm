@@ -1,11 +1,10 @@
 package ZChat::Config;
-
 use v5.34;
 use warnings;
 use utf8;
-
 use File::Spec;
 use File::Path qw(make_path);
+use ZChat::Utils ':all';
 
 sub new {
     my ($class, %opts) = @_;
@@ -28,24 +27,35 @@ sub load_effective_config {
     # 1. System defaults
     my $system_defaults = $self->_get_system_defaults();
     %$config = (%$config, %$system_defaults);
+    sel(2, "Setting preset '$config->{preset}' from system defaults");
     
     # 2. User global config
     my $user_config = $self->_load_user_config();
-    %$config = (%$config, %$user_config) if $user_config;
+    if ($user_config && $user_config->{preset}) {
+        %$config = (%$config, %$user_config);
+        sel(2, "Setting preset '$config->{preset}' from user config");
+    }
     
     # 3. Session config  
     my $effective_session = $self->_resolve_session_name(\%cli_opts, $config);
     $config->{session} = $effective_session;
+    sel(2, "Using session '$effective_session'");
     
     if ($effective_session) {
-        $self->{session_name} = $effective_session;  # Update our session name
+        $self->{session_name} = $effective_session;
         my $session_config = $self->_load_session_config();
-        %$config = (%$config, %$session_config) if $session_config;
+        if ($session_config && $session_config->{preset}) {
+            %$config = (%$config, %$session_config);
+            sel(2, "Setting preset '$config->{preset}' from session config");
+        }
     }
     
     # 4. CLI overrides (runtime only)
     for my $key (qw(preset system_prompt system_file)) {
-        $config->{$key} = $cli_opts{$key} if defined $cli_opts{$key};
+        if (defined $cli_opts{$key}) {
+            $config->{$key} = $cli_opts{$key};
+            sel(2, "Setting $key '$cli_opts{$key}' from CLI options");
+        }
     }
     
     $self->{effective_config} = $config;
@@ -68,7 +78,7 @@ sub _resolve_session_name {
     return 'default';
 }
 
-sub get_effective_session_name {
+sub get_session_name {
     my ($self) = @_;
     return $self->{effective_config}->{session} || 'default';
 }

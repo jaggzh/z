@@ -1,4 +1,5 @@
 package ZChat::Preset;
+use ZChat::Utils ':all';
 
 use v5.34;
 use warnings;
@@ -14,12 +15,18 @@ use POSIX qw(strftime);
 sub new {
     my ($class, %opts) = @_;
     
+    my $persona_bin = $opts{persona_bin};
+    $persona_bin = 'persona' unless defined $persona_bin && $persona_bin ne '';
+    
+    se "Here: $persona_bin";
     my $self = {
-        storage => $opts{storage} || die "storage required",
-        data_dir => $opts{data_dir} || File::Spec->catdir($FindBin::Bin, '..', 'data', 'sys'),
-        persona_bin => $opts{persona_bin} || 'persona',
+        storage => ($opts{storage} || die "storage required"),
+        data_dir => ($opts{data_dir} || File::Spec->catdir($FindBin::Bin, '..', 'data', 'sys')),
+        persona_bin => $persona_bin,
         template_engine => undef,
     };
+    se $self->{persona_bin} . " -- this is not defined";
+    $DB::single=1;
     
     bless $self, $class;
     
@@ -37,25 +44,39 @@ sub resolve_preset {
     
     return '' unless defined $preset_name && $preset_name ne '';
     
+    sel(1, "Resolving preset '$preset_name'");
+    
     # Try built-in config first
     my $config_content = $self->_try_config_preset($preset_name);
-    return $config_content if defined $config_content;
+    if (defined $config_content) {
+        sel(1, "Loaded preset '$preset_name' from config");
+        return $config_content;
+    }
     
     # Try data directory (file or directory)
     my $data_content = $self->_try_data_preset($preset_name);
-    return $data_content if defined $data_content;
+    if (defined $data_content) {
+        sel(1, "Loaded preset '$preset_name' from data directory");
+        return $data_content;
+    }
     
     # Try persona command
+    se "We r here: $$self{persona_bin}";
+    $DB::single=1;
     my $persona_content = $self->_try_persona_preset($preset_name, %opts);
-    return $persona_content if defined $persona_content;
+    if (defined $persona_content) {
+        sel(1, "Loaded preset '$preset_name' from persona command");
+        return $persona_content;
+    }
     
     # Fallback to default
-    # warn "Preset '$preset_name' not found, trying 'default'";
+    sel(1, "Preset '$preset_name' not found, trying 'default'");
     if ($preset_name ne 'default') {
         return $self->resolve_preset('default', %opts);
     }
     
     # Ultimate fallback
+    sel(1, "Using ultimate fallback preset");
     return "You are a helpful AI assistant.";
 }
 
@@ -96,26 +117,46 @@ sub _try_persona_preset {
     my @cmd = ($self->{persona_bin}, '--path', 'find', $preset_name);
     my $cmd = shell_quote(@cmd);
     
+    sel(1, "Loading Persona from disk with persona command");
+    sel(1, "  Command: $cmd");
+    
     my $output;
     eval {
         $output = `$cmd 2>/dev/null`;
         chomp $output if defined $output;
     };
     
+    if ($? != 0) {
+        sel(1, "persona command wasn't found or errored");
+        return undef;
+    }
+    
+    sel(2, "  persona provided:");
+    sel(2, "{{$output}}");
+    
     # Check if command succeeded and found files
-    return undef if $? != 0 || !defined $output || $output eq '';
+    return undef if !defined $output || $output eq '';
     
     my @files = split /\n/, $output;
     return undef unless @files;
     
     if (@files > 1) {
-        warn "Multiple persona files found for '$preset_name', using first: $files[0]";
+        sel(1, "Multiple persona files found for '$preset_name':");
+        sel(1, "  $_") for @files;
+        sel(1, "Using first: $files[0]");
     }
     
     my $persona_file = $files[0];
     return undef unless -e $persona_file && -r $persona_file;
     
-    return $self->_load_file_preset($persona_file);
+    sel(1, "Preset (persona file) found: $persona_file");
+    my ($persona_name) = $persona_file =~ m|/([^/]+)$|;
+    sel(1, "Preset persona name: $persona_name");
+    
+    my $content = $self->_load_file_preset($persona_file);
+    sel(2, "Preset persona content length: " . length($content)) if defined $content;
+    
+    return $content;
 }
 
 sub _load_directory_preset {

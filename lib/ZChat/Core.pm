@@ -1,14 +1,13 @@
 package ZChat::Core;
-
 use v5.34;
 use warnings;
 use utf8;
-
 use Mojo::UserAgent;
 use JSON::XS;
 use LWP::UserAgent;
 use HTTP::Request;
 use Encode qw(decode encode_utf8);
+use ZChat::Utils ':all';
 
 sub new {
     my ($class, %opts) = @_;
@@ -26,6 +25,16 @@ sub new {
 sub complete_request {
     my ($self, $messages, %opts) = @_;
     
+    sel(2, "Making completion request with " . @$messages . " messages");
+    
+    # Debug: show message summary
+    for my $i (0..$#$messages) {
+        my $msg = $messages->[$i];
+        my $content_len = length($msg->{content});
+        sel(3, "Message $i: role=$msg->{role}, length=$content_len");
+        sel(4, "Message $i content: $msg->{content}");
+    }
+    
     # Default options
     my $temperature = $opts{temperature} || 0.7;
     my $top_k = $opts{top_k} || 40;
@@ -40,6 +49,8 @@ sub complete_request {
     # Get model info
     my $model_info = $self->get_model_info();
     my $model_name = $self->_extract_model_name($model_info);
+    
+    sel(2, "Using model: $model_name");
     
     # Build API request
     my $data = {
@@ -58,6 +69,8 @@ sub complete_request {
     $data->{grammar} = $opts{grammar} if $opts{grammar};
     $data->{n_probs} = int($opts{n_probs}) if $opts{n_probs};
     
+    sel(3, "API request data: " . dumps($data));
+
     if ($stream) {
         return $self->_stream_completion($data, %opts);
     } else {

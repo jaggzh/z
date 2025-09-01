@@ -11,6 +11,8 @@ use File::Spec;
 use File::Path qw(make_path);
 use Encode qw(decode encode_utf8);
 
+use ZChat::Utils qw(:all);
+
 sub new {
     my ($class, %opts) = @_;
     
@@ -61,102 +63,6 @@ sub save_yaml {
     return 1;
 }
 
-# JSON operations (for conversation history)
-sub load_json {
-    my ($self, $filepath) = @_;
-    
-    return [] unless -e $filepath;
-    
-    my $result = [];
-    eval {
-        my $raw_content = read_binary($filepath);
-        my $decoded = decode('UTF-8', $raw_content, Encode::FB_QUIET);
-        
-        # Handle trailing commas (lenient parsing)
-        $decoded =~ s/,\s*(\]|\})/$1/g;
-        
-        if ($decoded =~ /^\s*$/) {
-            $result = [];
-        } else {
-            my $json = JSON::XS->new->relaxed(1);
-            my $parsed = $json->decode($decoded);
-            $result = ref($parsed) eq 'ARRAY' ? $parsed : [];
-        }
-    };
-    
-    if ($@) {
-        warn "Failed to load JSON file '$filepath': $@";
-        return [];
-    }
-
-    return $result;
-}
-
-sub save_json {
-    my ($self, $filepath, $data) = @_;
-    
-    # Ensure directory exists
-    my $dir = (File::Spec->splitpath($filepath))[1];
-    make_path($dir) if $dir && !-d $dir;
-    
-    my $old_umask = umask($self->{umask});
-    
-    eval {
-        my $json = JSON::XS->new->pretty(1)->utf8->space_after;
-        my $json_text = $json->encode($data);
-        write_text($filepath, $json_text);
-    };
-    
-    umask($old_umask);
-    
-    if ($@) {
-        warn "Failed to save JSON file '$filepath': $@";
-        return 0;
-    }
-    
-    return 1;
-}
-
-# Plain text operations
-sub read_file {
-    my ($self, $filepath) = @_;
-    
-    return undef unless -e $filepath && -r $filepath;
-    
-    eval {
-        my $content = read_text($filepath);
-        return $content;
-    };
-    
-    if ($@) {
-        warn "Failed to read file '$filepath': $@";
-        return undef;
-    }
-}
-
-sub write_file {
-    my ($self, $filepath, $content) = @_;
-    
-    # Ensure directory exists
-    my $dir = (File::Spec->splitpath($filepath))[1];
-    make_path($dir) if $dir && !-d $dir;
-    
-    my $old_umask = umask($self->{umask});
-    
-    eval {
-        write_text($filepath, $content);
-    };
-    
-    umask($old_umask);
-    
-    if ($@) {
-        warn "Failed to write file '$filepath': $@";
-        return 0;
-    }
-    
-    return 1;
-}
-
 # Session-specific operations
 sub get_session_dir {
     my ($self, $session_name) = @_;
@@ -179,7 +85,7 @@ sub load_history {
     return [] unless $session_dir;
     
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
-    my $history = $self->load_json($history_file);
+    my $history = read_json_file($history_file);
     
     return [] unless $history && ref($history) eq 'ARRAY';
     
@@ -226,7 +132,7 @@ sub save_history {
     # Add final entry
     push @entries, $current_entry if keys %$current_entry;
     
-    return $self->save_json($history_file, \@entries);
+    write_json_file($history_file, \@entries, min=>1);
 }
 
 sub append_to_history {
@@ -240,7 +146,7 @@ sub append_to_history {
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
     
     # Load existing history
-    my $history = $self->load_json($history_file);
+    my $history = read_json_file($history_file);
     $history = [] unless ref($history) eq 'ARRAY';  # Ensure it's always an array ref
     
     # Add new entry
@@ -249,7 +155,7 @@ sub append_to_history {
         assistant => $assistant_response,
     };
     
-    return $self->save_json($history_file, $history);
+    return write_json_file($history_file, $history, min=>1);
 }
 
 # Pin operations

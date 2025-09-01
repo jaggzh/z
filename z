@@ -1,0 +1,547 @@
+#!/usr/bin/perl -d
+#!/usr/bin/perl
+
+use v5.34;
+use warnings;
+use utf8;
+
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+
+use ZChat;
+use ZChat::Storage;
+use ZChat::Config;
+use ZChat::Pin;
+
+use bansi;
+use Getopt::Long::Descriptive;
+use POSIX qw(strftime);
+use LWP::UserAgent;
+use JSON::XS;
+use URI::Escape;
+use Data::Dumper;
+use List::Util qw(max);
+use Clipboard;
+use MIME::Base64;
+use Image::Magick;
+use File::Slurper qw(write_text read_text read_lines read_binary);
+use File::Basename;
+use Encode qw(encode_utf8 decode);
+use String::ShellQuote;
+use File::Copy;
+use File::Temp qw(tempfile);
+use File::Compare;
+use Carp 'confess';
+use Term::ReadLine;
+use Term::ReadLine::Gnu qw(RL_PROMPT_START_IGNORE RL_PROMPT_END_IGNORE);
+no warnings 'once';
+
+# Terminal control
+my $C_IGN_S = RL_PROMPT_START_IGNORE;
+my $C_IGN_E = RL_PROMPT_END_IGNORE;
+
+# Global settings
+select STDERR; $|=1;
+select STDOUT; $|=1;
+binmode *STDIN, "raw";
+binmode *STDOUT, "utf8";
+binmode *STDERR, "utf8";
+
+my $user = `whoami`; chomp $user;
+my $def_npredict = 8192;
+my $def_pin_max = 50;
+my @cmd_tts = ("voice-piper-interactive");
+my $verbose = 0;
+my $verbose_resp = 0;
+my $editor = $ENV{EDITOR} // 'vim';
+
+# Colors
+my $clr_user = a24bg(35,0,35). a24fg(230,255,255);
+my $clr_sys = a24bg(5,20,40). a24fg(230,245,255);
+my $intmode_prompt = "$C_IGN_S$gra${C_IGN_E}>> $C_IGN_S$rst$clr_user$C_IGN_E";
+my $clr_notice_bg = a24bg(30,155,30);
+my $clr_notice_fg = $whi;
+
+sub se { say STDERR @_; }
+sub sel { my $l=shift; say STDERR @_ if $verbose >= $l; }
+sub pe { print STDERR @_; }
+sub pel { my $l=shift; print STDERR @_ if $verbose >= $l; }
+sub sewarn { say STDERR "$bgred$yel", @_, $rst; }
+
+my ($opt, $usage) = describe_options(
+    'z %o [prompt]',
+    [ 'help|h',             "This beautiful help" ],
+    [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
+    [ 'verbose_resp|vr+',   "Verbose response data" ],
+    [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt)" ],
+    [ 'clipboard|cb',       "Use clipboard content" ],
+    [ 'interactive|int|i',  "Interactive mode" ],
+    [ 'echo1|e',            "Echo back initial prompt" ],
+    [ 'echo-delineated|echod|ee', "Echo with <echo></echo> and <reply></reply> tags" ],
+    [ 'raw|r',              "Raw output (no processing)" ],
+    [ 'token_count|T',      "Count tokens in input text" ],
+    [ 'ctx',                "Get running model n_ctx" ],
+    [ 'metadata',           "Get running model metadata" ],
+    [ 'tokens_full',        "Output full tokens with parts" ],
+    [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
+    [ 'play_user|pu',       "Play user text with TTS" ],
+    [ 'play_resp|pr',       "Play response text with TTS" ],
+    [ 'probs:s',            "Return probabilities for top N tokens" ],
+    [ 'no-color|nc',        "Disable color in interactive mode" ],
+    [ 'grammar|g=s',        "Force a grammar" ],
+    [ 'preset|p=s',         "Use this preset (was tasktype)" ],
+    [ 'session|n=s',        "Session name (slash-separated path)" ],
+    [ 'wipe|w',             "Wipe conversation history" ],
+    [ 'no-history|H',       "Do not use history (no load, no store)" ],
+    [ 'input-only|I',       "Use history BUT do not write to it" ],
+    [ 'edit-hist|eh|E',     "Edit history in $editor" ],
+    [ 'store-user|su|S',    "Store preset/session in user global config" ],
+    [ 'store-session|ss',   "Store preset in current session config" ],
+    [ 'system=s',           "Set system prompt (overrides preset)" ],
+    [ 'system-file=s',      "Set system prompt from file (overrides preset)" ],
+    [],
+    [ 'Pin Management:' ],
+    [ 'pin=s@',             "Add pinned message(s)" ],
+    [ 'pin-file=s@',        "Add pinned message(s) from file(s)" ],
+    [ 'pin-list',           "List all pinned messages" ],
+    [ 'pin-sum',            "List pinned messages (one-line summary)" ],
+    [ 'pin-sum-len=i',      "Max length for pin summary lines" ],
+    [ 'pin-write=s',        "Overwrite pin by index: --pin-write 0='new content'" ],
+    [ 'pin-clear',          "Clear all pinned messages" ],
+    [ 'pin-rm=i@',          "Remove pin(s) by index" ],
+    [ 'pins-sys-max=i',     "Max system pins", { default => $def_pin_max } ],
+    [ 'pins-user-max=i',    "Max user pins", { default => $def_pin_max } ],
+    [ 'pins-ast-max=i',     "Max assistant pins", { default => $def_pin_max } ],
+    [ 'thought|think',      "Do not remove reasoning sections" ],
+    [],
+    [ 'Utility:' ],
+    [ 'list-presets|L',     "List available presets" ],
+    [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
+);
+
+@ARGV = map { decode('UTF-8', $_) } @ARGV;
+
+if ($opt->help) { print($usage->text), exit; }
+
+$verbose = $opt->verbose;
+$verbose_resp = $opt->verbose_resp;
+
+# Parse input
+my $uprompt;
+if (@ARGV) {
+    if ($ARGV[0] eq '-') {
+        undef $/;
+        $uprompt = <STDIN>;
+        $uprompt = decode('UTF-8', $uprompt, Encode::FB_QUIET);
+    } else {
+        $uprompt = join(' ', @ARGV);
+    }
+}
+
+# Echo handling
+if (defined $uprompt) {
+    if ($opt->echo_delineated) {
+        print "<echo>", $uprompt, ($uprompt !~ /\n$/ ? "\n" : ''), "</echo>\n";
+    } elsif ($opt->echo1) {
+        print $uprompt, ($uprompt !~ /\n$/ ? "\n" : '');
+    }
+}
+
+# Validate system prompt options
+if (defined $opt->system && defined $opt->system_file) {
+    die "${bred}ERROR: Cannot use both --system and --system-file$rst\n";
+}
+
+# Handle images and clipboard
+my @image_data;
+my $use_images = 0;
+
+if ($opt->clipboard) {
+    my $clip_data = Clipboard->paste;
+    
+    if ($clip_data =~ /^\xFF\xD8/) {  # JPEG binary
+        my $image_id = 'img';
+        my $base64_image = encode_base64($clip_data);
+        push @image_data, { id => $image_id, data => $base64_image };
+        $use_images = 1;
+    } elsif ($clip_data =~ /^\p{IsPrint}/) {  # Text
+        if (defined $uprompt) {
+            die "${bred}ERROR: --clipboard and query are not compatible$rst\n";
+        }
+        $uprompt = encode_utf8($clip_data);
+    } else {
+        die "${bred}ERROR: Unsupported clipboard content$rst\n";
+    }
+}
+
+if ($opt->image) {
+    for my $index (0..$#{$opt->image}) {
+        my $image_path = $opt->image->[$index];
+        unless (-e $image_path) {
+            die "${bred}ERROR: Image file not found: $image_path$rst\n";
+        }
+
+        my $image = Image::Magick->new;
+        $image->Read($image_path);
+        my $base64_image = encode_base64($image->ImageToBlob());
+
+        my $image_id = (@{$opt->image} == 1) ? 'img' : "img-" . ($index + 1);
+        my $ora = a24fg(255,128,30);
+        say "${ora}Attaching image ${whi}$image_id$ora, Base64 len: " . length($base64_image);
+        
+        push @image_data, { id => $image_id, data => $base64_image };
+    }
+    $use_images = 1;
+}
+
+# Initialize ZChat
+my $zchat = ZChat->new(
+    session => $opt->session // '',
+    preset => $opt->preset,
+    system_prompt => $opt->system,
+    system_file => $opt->system_file,
+    verbose => $verbose,
+);
+
+# Handle utility commands first
+if ($opt->list_presets) {
+    my $presets = $zchat->{preset_mgr}->list_presets();
+    say "Available presets:";
+    say "  $_" for @$presets;
+    exit;
+}
+
+if ($opt->token_count) {
+    my $input_text = $uprompt // '';
+    if ($input_text eq '') {
+        say 1;  # Empty input = 1 token
+    } else {
+        my $token_count = $zchat->{core}->count_tokens($input_text);
+        say $token_count;
+    }
+    exit;
+}
+
+if ($opt->tokens_full) {
+    my $input_text = $uprompt // '';
+    die "${bred}No input text provided$rst\n" if $input_text eq '';
+    
+    my @tokens = $zchat->{core}->tokenize($input_text, with_pieces => 1);
+    my $json = JSON::XS->new->utf8->canonical(1)->encode(\@tokens);
+    say $json;
+    exit;
+}
+
+if ($opt->ctx) {
+    my $n_ctx = $zchat->{core}->get_n_ctx();
+    say $n_ctx;
+    exit;
+}
+
+if ($opt->metadata) {
+    my $model_info = $zchat->{core}->get_model_info();
+    for my $key (sort keys %$model_info) {
+        say "$key -> $model_info->{$key}";
+    }
+    exit;
+}
+
+# Pin management commands
+if ($opt->pin_list) {
+    my $pins = $zchat->list_pins();
+    if (@$pins) {
+        for my $i (0..$#$pins) {
+            my $pin = $pins->[$i];
+            say "$i: [$pin->{role}/$pin->{method}] $pin->{content}";
+        }
+    } else {
+        say "No pins found.";
+    }
+    exit;
+}
+
+if ($opt->pin_sum) {
+    my $max_len = $opt->pin_sum_len // 80;
+    my $summaries = $zchat->{pin_mgr}->get_pins_summary($max_len);
+    if (@$summaries) {
+        say $_ for @$summaries;
+    } else {
+        say "No pins found.";
+    }
+    exit;
+}
+
+if ($opt->pin_clear) {
+    $zchat->clear_pins();
+    say "All pins cleared.";
+    exit;
+}
+
+if ($opt->pin_rm) {
+    my @indices = @{$opt->pin_rm};
+    # Sort in reverse order to avoid index shifting
+    @indices = sort { $b <=> $a } @indices;
+    
+    my $removed = 0;
+    for my $index (@indices) {
+        if ($zchat->remove_pin($index)) {
+            $removed++;
+        } else {
+            warn "Failed to remove pin at index $index";
+        }
+    }
+    say "Removed $removed pin(s).";
+    exit;
+}
+
+if ($opt->pin_write) {
+    # Format: --pin-write 0='new content'
+    if ($opt->pin_write =~ /^(\d+)=(.*)$/) {
+        my ($index, $new_content) = ($1, $2);
+        
+        # Remove old pin and add new one at same position
+        my $pins = $zchat->list_pins();
+        if ($index < @$pins) {
+            $zchat->remove_pin($index);
+            # For simplicity, just add new pin (order might change)
+            $zchat->pin($new_content, 
+                role => $pins->[$index]{role},
+                method => $pins->[$index]{method}
+            );
+            say "Pin $index updated.";
+        } else {
+            die "Pin index $index does not exist\n";
+        }
+    } else {
+        die "Invalid --pin-write format. Use: --pin-write 0='new content'\n";
+    }
+    exit;
+}
+
+# History management
+if ($opt->wipe) {
+    if ($opt->input_only) {
+        say "Input-only mode - wiping only in memory.";
+    } elsif ($opt->no_history) {
+        say "No-history mode - wiping only in memory.";
+    } else {
+        # Clear history through storage
+        my $session_name = $zchat->{session_name} || 'default';
+        $zchat->{storage}->save_history($session_name, []);
+        sel 1, "${yel}Conversation history wiped.$rst";
+    }
+    exit unless defined $uprompt;
+}
+
+if ($opt->edit_hist) {
+    die "Input-only mode - editing makes no sense\n" if $opt->input_only;
+    die "No-history mode - editing makes no sense\n" if $opt->no_history;
+    
+    my $session_name = $zchat->{session_name} || 'default';
+    my $session_dir = $zchat->{storage}->get_session_dir($session_name);
+    my $history_file = File::Spec->catfile($session_dir, 'history.json');
+    
+    system($editor, '--', $history_file);
+    exit;
+}
+
+# Add pins from CLI options
+if ($opt->pin) {
+    for my $pin_content (@{$opt->pin}) {
+        $zchat->pin($pin_content);
+    }
+}
+
+if ($opt->pin_file) {
+    for my $pin_file (@{$opt->pin_file}) {
+        unless (-e $pin_file && -r $pin_file) {
+            die "${bred}ERROR: Pin file not found or readable: $pin_file$rst\n";
+        }
+        my $content = read_text($pin_file);
+        chomp $content;
+        $zchat->pin($content);
+    }
+}
+
+# Storage operations
+if ($opt->store_user) {
+    my %store_opts;
+    $store_opts{preset} = $opt->preset if $opt->preset;
+    $store_opts{session} = $opt->session if $opt->session;
+    
+    $zchat->store_user_config(%store_opts);
+    say "Stored user config: " . join(", ", keys %store_opts) if %store_opts;
+    exit unless defined $uprompt;
+}
+
+if ($opt->store_session) {
+    my %store_opts;
+    $store_opts{preset} = $opt->preset if $opt->preset;
+    
+    $zchat->store_session_config(%store_opts);
+    say "Stored session config: " . join(", ", keys %store_opts) if %store_opts;
+    exit unless defined $uprompt;
+}
+
+# Validate we have input for completion
+my $intmode = $opt->interactive;
+if (!$intmode && !defined $uprompt) {
+    die "${bred}No query provided. See -h or use -i for interactive mode.$rst\n";
+}
+
+# Disable colors in non-interactive mode
+if (!$intmode || $opt->no_color) {
+    $clr_user = '';
+    $clr_sys = '';
+}
+
+# Show session info
+say "${clr_notice_bg}${clr_notice_fg}Session: " . ($zchat->{session_name} || 'default') . "$rst" if $verbose;
+say "${clr_notice_bg}${clr_notice_fg}Preset: " . ($zchat->get_preset() || 'none') . "$rst" if $verbose;
+
+# Terminal setup for interactive mode
+my $term;
+if ($intmode) {
+    $term = Term::ReadLine->new("z") or die "Cannot create Term::ReadLine object";
+    
+    my $readline_histfile = "/tmp/zchat_readline-$user.json";
+    $term->ReadHistory($readline_histfile) if -e $readline_histfile;
+    
+    # Set up terminal reset on enter
+    $term->add_defun("accept-line", sub {
+        my ($count, $key) = @_;
+        print "$rst";
+        $term->call_function("accept-line", $count, $key);
+    }, ord("\n"));
+}
+
+# Main completion loop
+while (1) {
+    # Process current query if we have one
+    if (defined $uprompt && $uprompt ne '') {
+        # TTS for user input
+        tts_str($uprompt) if $opt->play_user;
+        
+        print $clr_sys if $intmode;
+        
+        # Prepare completion options
+        my %complete_opts = (
+            stream => !$opt->raw,
+            raw => $opt->raw,
+            show_thought => $opt->thought,
+            n_predict => $opt->n_predict,
+            grammar => $opt->grammar,
+        );
+        
+        # Add probability tracking if requested
+        $complete_opts{n_probs} = $opt->probs if defined $opt->probs;
+        
+        # Handle remove pattern for thought removal
+        if ($zchat->{preset_mgr}) {
+            my $preset_metadata = $zchat->{preset_mgr}->get_preset_metadata($zchat->get_preset() || '');
+            if ($preset_metadata->{think} && !$opt->thought) {
+                $complete_opts{remove_pattern} = qr/(?:<think>)?.*?<\/think>\s*/s;
+            }
+        }
+        
+        # Add images to user input if present
+        if (@image_data) {
+            # For now, just mention images in prompt
+            my @img_mentions;
+            for my $img (@image_data) {
+                push @img_mentions, "[$img->{id}]";
+            }
+            $uprompt .= "\n\nImages attached: " . join(", ", @img_mentions);
+        }
+        
+        # Make completion request
+        my $response = $zchat->complete($uprompt, %complete_opts);
+        
+        say $rst if $intmode;
+        
+        # TTS for response
+        tts_str($response) if $opt->play_resp;
+        
+        # Save to history (unless disabled)
+        unless ($opt->no_history || $opt->input_only) {
+            my $session_name = ($zchat->{session_name} && $zchat->{session_name} ne '') ? $zchat->{session_name} : 'default';
+            $zchat->{storage}->append_to_history($session_name, $uprompt, $response);
+        }
+    }
+    
+    # Interactive mode: get next input
+    if ($intmode) {
+        my $line = $term->readline($intmode_prompt);
+        print "$rst";
+        
+        # Quit conditions
+        last if !defined($line) || $line =~ /^(q|quit)$/i;
+        
+        $term->addhistory($line) if $line ne '';
+        my $readline_histfile = "/tmp/zchat_readline-$user.json";
+        $term->write_history($readline_histfile);
+        
+        $uprompt = $line;
+    }
+    
+    last unless $intmode;
+}
+
+# Save readline history
+if ($intmode) {
+    my $readline_histfile = "/tmp/zchat_readline-$user.json";
+    $term->write_history($readline_histfile);
+}
+
+exit;
+
+# Utility functions
+sub tts_str {
+    my $str = shift;
+    open(my $ttsf, "|-", @cmd_tts) || die "Couldn't execute TTS: $cmd_tts[0]: $!";
+    print $ttsf $str;
+    close $ttsf;
+}
+
+__END__
+
+=head1 NAME
+
+z - Command-line interface to ZChat LLM system
+
+=head1 SYNOPSIS
+
+    # Basic usage
+    z "Hello, how are you?"
+    
+    # With preset
+    z -p coding "Write a Perl function"
+    
+    # Interactive mode
+    z -i
+    
+    # Pin management
+    z --pin "You are a helpful assistant" --pin-list
+    z --pin-sum
+    z --pin-clear
+    
+    # Session management  
+    z -n myproject/analysis "What should I focus on?"
+    z -p coding -S  # Store as user default
+    z -n project -p specialized --store-session  # Store in session
+    
+    # Images
+    z --img photo.jpg "What's in this image?"
+    z --clipboard  # Use clipboard content
+    
+    # Utility
+    z -T "Count tokens in this text"
+    z --ctx  # Show model context size
+    z --list-presets
+
+=head1 DESCRIPTION
+
+Command-line interface to the ZChat modular LLM system. Supports
+conversation history, pinned messages, presets, sessions, and more.
+
+=cut

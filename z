@@ -1,5 +1,5 @@
-#!/usr/bin/perl -d
 #!/usr/bin/perl
+#!/usr/bin/perl -d
 
 use v5.34;
 use warnings;
@@ -12,6 +12,7 @@ use ZChat;
 use ZChat::Storage;
 use ZChat::Config;
 use ZChat::Pin;
+use ZChat::Utils ':all';
 
 use bansi;
 use Getopt::Long::Descriptive;
@@ -61,12 +62,6 @@ my $clr_sys = a24bg(5,20,40). a24fg(230,245,255);
 my $intmode_prompt = "$C_IGN_S$gra${C_IGN_E}>> $C_IGN_S$rst$clr_user$C_IGN_E";
 my $clr_notice_bg = a24bg(30,155,30);
 my $clr_notice_fg = $whi;
-
-sub se { say STDERR @_; }
-sub sel { my $l=shift; say STDERR @_ if $verbose >= $l; }
-sub pe { print STDERR @_; }
-sub pel { my $l=shift; print STDERR @_ if $verbose >= $l; }
-sub sewarn { say STDERR "$bgred$yel", @_, $rst; }
 
 my ($opt, $usage) = describe_options(
     'z %o [prompt]',
@@ -124,6 +119,7 @@ my ($opt, $usage) = describe_options(
 if ($opt->help) { print($usage->text), exit; }
 
 $verbose = $opt->verbose;
+set_verbose($verbose); # In Utils
 $verbose_resp = $opt->verbose_resp;
 
 # Parse input
@@ -396,8 +392,8 @@ if (!$intmode || $opt->no_color) {
 }
 
 # Show session info
-say "${clr_notice_bg}${clr_notice_fg}Session: " . ($zchat->{session_name} || 'default') . "$rst" if $verbose;
-say "${clr_notice_bg}${clr_notice_fg}Preset: " . ($zchat->get_preset() || 'none') . "$rst" if $verbose;
+sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . ($zchat->{session_name} || 'default') . "$rst";
+sel 1, "${clr_notice_bg}${clr_notice_fg}Preset: " . ($zchat->get_preset() || 'none') . "$rst";
 
 # Terminal setup for interactive mode
 my $term;

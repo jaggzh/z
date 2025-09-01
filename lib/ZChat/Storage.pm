@@ -6,12 +6,10 @@ use utf8;
 
 use YAML::XS qw(LoadFile DumpFile);
 use JSON::XS;
-use File::Slurper qw(write_text read_text read_binary);
 use File::Spec;
 use File::Path qw(make_path);
-use Encode qw(decode encode_utf8);
 
-use ZChat::Utils qw(:all);
+use ZChat::Utils ':all';
 
 sub new {
     my ($class, %opts) = @_;
@@ -78,6 +76,7 @@ sub get_session_dir {
 
 sub load_history {
     my ($self, $session_name) = @_;
+    $DB::single=1;
     
     return [] unless $session_name;
     
@@ -132,7 +131,7 @@ sub save_history {
     # Add final entry
     push @entries, $current_entry if keys %$current_entry;
     
-    write_json_file($history_file, \@entries, min=>1);
+    write_json_file($history_file, \@entries, { min=>1 });
 }
 
 sub append_to_history {
@@ -155,7 +154,7 @@ sub append_to_history {
         assistant => $assistant_response,
     };
     
-    return write_json_file($history_file, $history, min=>1);
+    return write_json_file($history_file, $history, { min=>1 });
 }
 
 # Pin operations

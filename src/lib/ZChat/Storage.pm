@@ -67,25 +67,29 @@ sub load_json {
     
     return [] unless -e $filepath;
     
-    my $raw_content;
+    my $result = [];
     eval {
-        $raw_content = read_binary($filepath);
+        my $raw_content = read_binary($filepath);
         my $decoded = decode('UTF-8', $raw_content, Encode::FB_QUIET);
         
         # Handle trailing commas (lenient parsing)
         $decoded =~ s/,\s*(\]|\})/$1/g;
         
-        return [] if $decoded =~ /^\s*$/;
-        
-        my $json = JSON::XS->new->relaxed(1);
-        my $result = $json->decode($decoded);
-        return ref($result) eq 'ARRAY' ? $result : [];
+        if ($decoded =~ /^\s*$/) {
+            $result = [];
+        } else {
+            my $json = JSON::XS->new->relaxed(1);
+            my $parsed = $json->decode($decoded);
+            $result = ref($parsed) eq 'ARRAY' ? $parsed : [];
+        }
     };
     
     if ($@) {
         warn "Failed to load JSON file '$filepath': $@";
         return [];
     }
+
+    return $result;
 }
 
 sub save_json {

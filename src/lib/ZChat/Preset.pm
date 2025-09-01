@@ -50,7 +50,7 @@ sub resolve_preset {
     return $persona_content if defined $persona_content;
     
     # Fallback to default
-    warn "Preset '$preset_name' not found, trying 'default'";
+    # warn "Preset '$preset_name' not found, trying 'default'";
     if ($preset_name ne 'default') {
         return $self->resolve_preset('default', %opts);
     }
@@ -169,14 +169,17 @@ sub _render_template {
         modelname => 'unknown', # Will be filled by caller if needed
     );
     
+    my $result = $template;
     eval {
-        return $self->{template_engine}->render_string($template, \%template_vars);
+        $result = $self->{template_engine}->render_string($template, \%template_vars);
     };
     
     if ($@) {
         warn "Template rendering failed: $@";
         return $template;  # Return unprocessed on error
     }
+    
+    return $result;
 }
 
 sub _make_datenow {

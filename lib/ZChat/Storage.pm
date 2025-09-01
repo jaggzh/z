@@ -76,7 +76,6 @@ sub get_session_dir {
 
 sub load_history {
     my ($self, $session_name) = @_;
-    $DB::single=1;
     
     return [] unless $session_name;
     

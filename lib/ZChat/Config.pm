@@ -34,7 +34,11 @@ sub load_effective_config {
     %$config = (%$config, %$user_config) if $user_config;
     
     # 3. Session config  
-    if ($self->{session_name}) {
+    my $effective_session = $self->_resolve_session_name(\%cli_opts, $config);
+    $config->{session} = $effective_session;
+    
+    if ($effective_session) {
+        $self->{session_name} = $effective_session;  # Update our session name
         my $session_config = $self->_load_session_config();
         %$config = (%$config, %$session_config) if $session_config;
     }
@@ -46,6 +50,27 @@ sub load_effective_config {
     
     $self->{effective_config} = $config;
     return $config;
+}
+
+sub _resolve_session_name {
+    my ($self, $cli_opts, $config) = @_;
+    
+    # CLI session takes precedence
+    return $cli_opts->{session} if defined $cli_opts->{session} && $cli_opts->{session} ne '';
+    
+    # Then original session_name from constructor
+    return $self->{session_name} if defined $self->{session_name} && $self->{session_name} ne '';
+    
+    # Then user config session
+    return $config->{session} if defined $config->{session} && $config->{session} ne '';
+    
+    # Finally default
+    return 'default';
+}
+
+sub get_effective_session_name {
+    my ($self) = @_;
+    return $self->{effective_config}->{session} || 'default';
 }
 
 sub _get_system_defaults {

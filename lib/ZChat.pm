@@ -17,7 +17,7 @@ sub new {
     
     my $self = {
         session_name => $opts{session} // '',
-        preset_name => $opts{preset},
+        preset => $opts{preset},
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},
         config => undef,
@@ -46,7 +46,9 @@ sub new {
     
     # Load effective configuration
     $self->_load_config(%opts);
-    
+    $DB::single=1;
+    $self->{session_name} = $self->{config}->get_effective_session_name();
+
     return $self;
 }
 
@@ -58,8 +60,6 @@ sub _load_config {
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},
     );
-    
-    $self->{config} = $config;
 }
 
 sub complete {

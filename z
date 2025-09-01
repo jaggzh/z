@@ -1,5 +1,5 @@
-#!/usr/bin/perl
 #!/usr/bin/perl -d
+#!/usr/bin/perl
 
 use v5.34;
 use warnings;
@@ -322,8 +322,7 @@ if ($opt->wipe) {
         say "No-history mode - wiping only in memory.";
     } else {
         # Clear history through storage
-        my $session_name = $zchat->{session_name} || 'default';
-        $zchat->{storage}->save_history($session_name, []);
+        $zchat->{storage}->save_history($zchat->{session_name}, []);
         sel 1, "${yel}Conversation history wiped.$rst";
     }
     exit unless defined $uprompt;
@@ -460,8 +459,7 @@ while (1) {
         
         # Save to history (unless disabled)
         unless ($opt->no_history || $opt->input_only) {
-            my $session_name = ($zchat->{session_name} && $zchat->{session_name} ne '') ? $zchat->{session_name} : 'default';
-            $zchat->{storage}->append_to_history($session_name, $uprompt, $response);
+            $zchat->{storage}->append_to_history($zchat->{session_name}, $uprompt, $response);
         }
     }
     

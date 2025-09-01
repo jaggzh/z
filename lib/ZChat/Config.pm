@@ -10,8 +10,8 @@ sub new {
     my ($class, %opts) = @_;
     
     my $self = {
-        storage => $opts{storage} || die "storage required",
-        session_name => $opts{session_name} // '',
+        storage => ($opts{storage} // die "storage required"),
+        session_name => ($opts{session_name} // ''),
         effective_config => {},
     };
     

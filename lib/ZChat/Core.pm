@@ -13,7 +13,7 @@ sub new {
     my ($class, %opts) = @_;
     
     my $self = {
-        api_base => $opts{api_base} || $ENV{LLM_API_URL} || 'http://127.0.0.1:8080',
+        api_base => ($opts{api_base} // $ENV{LLM_API_URL} // 'http://127.0.0.1:8080'),
         model_info => undef,
         model_info_loaded => 0,
     };

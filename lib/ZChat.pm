@@ -17,7 +17,7 @@ sub new {
     my ($class, %opts) = @_;
     
     my $self = {
-        session_name => $opts{session} // '',
+        session_name => ($opts{session} // ''),
         preset => $opts{preset},
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},

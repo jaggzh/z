@@ -20,8 +20,8 @@ sub new {
     
     se "Here: $persona_bin";
     my $self = {
-        storage => ($opts{storage} || die "storage required"),
-        data_dir => ($opts{data_dir} || File::Spec->catdir($FindBin::Bin, '..', 'data', 'sys')),
+        storage => ($opts{storage} // die "storage required"),
+        data_dir => ($opts{data_dir} // File::Spec->catdir($FindBin::Bin, '..', 'data', 'sys')),
         persona_bin => $persona_bin,
         template_engine => undef,
     };

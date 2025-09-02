@@ -108,8 +108,10 @@ sub _load_user_config {
     
     my $config_dir = $self->_get_config_dir();
     my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
-    
-    return $self->{storage}->load_yaml($user_config_file);
+    sel 1, "Loading User config file: $user_config_file";
+    my $yaml = $self->{storage}->load_yaml($user_config_file);
+    sel 1, "  YAML result: ", ($yaml // 'unable to load');
+    return $yaml;
 }
 
 sub _load_session_config {
@@ -119,8 +121,11 @@ sub _load_session_config {
     
     my $session_dir = $self->_get_session_dir();
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
+    sel 1, "Loading Session config file: $session_config_file";
+    my $yaml = $self->{storage}->load_yaml($session_config_file);
+    sel 1, "  YAML result: ", ($yaml // 'unable to load');
     
-    return $self->{storage}->load_yaml($session_config_file);
+    return $yaml;
 }
 
 sub store_user_config {
@@ -141,6 +146,7 @@ sub store_user_config {
         }
     }
     
+    sel 1, "Saving user config as YAML at: $user_config_file";
     return $self->{storage}->save_yaml($user_config_file, $existing);
 }
 

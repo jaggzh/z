@@ -1,8 +1,8 @@
 package ZChat;
-
 use v5.34;
 use warnings;
 use utf8;
+use File::Spec;
 
 use ZChat::Core;
 use ZChat::Config;
@@ -40,9 +40,21 @@ sub new {
         storage => $self->{storage},
         session_name => $self->{session_name}
     );
-    $self->{preset_mgr} = ZChat::Preset->new(
-        storage => $self->{storage}
-    );
+
+	# Presets setup
+    my %preset_opts = (
+    	storage => $self->{storage},
+	);
+	if (exists $ENV{ZCHAT_DATADIR}) {
+		my $data_dir = File::Spec->catdir($ENV{ZCHAT_DATADIR}, 'sys');
+		if ($data_dir ne '' && -d $data_dir) {
+			$preset_opts{data_dir} = $data_dir;
+		} else {
+			$preset_opts{data_dir} = undef;
+		}
+	}
+    $self->{preset_mgr} = ZChat::Preset->new(%preset_opts);
+
     $self->{core} = ZChat::Core->new();
     
     # Load effective configuration

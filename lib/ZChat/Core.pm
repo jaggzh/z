@@ -29,13 +29,13 @@ sub complete_request {
     
     # Debug: show message summary
     if (get_verbose() >= 3) {
-		for my $i (0..$#$messages) {
-			my $msg = $messages->[$i];
-			my $content_len = length($msg->{content});
-			sel(3, "Message $i: role=$msg->{role}, length=$content_len");
-			sel(4, "Message $i content: $msg->{content}");
-		}
-	}
+        for my $i (0..$#$messages) {
+            my $msg = $messages->[$i];
+            my $content_len = length($msg->{content});
+            sel(3, "Message $i: role=$msg->{role}, length=$content_len");
+            sel(4, "Message $i content: $msg->{content}");
+        }
+    }
     
     # Default options
     my $temperature = $opts{temperature} || 0.7;
@@ -156,6 +156,7 @@ sub _stream_completion {
     }
     
     # Ensure newline at end
+    $DB::single=1;
     print "\n" if $answer && $answer !~ /\n$/;
     
     return $answer;
@@ -278,12 +279,13 @@ sub estimate_message_tokens {
 sub ping {
     my ($self) = @_;
     
+    my $res = 0;
     eval {
         $self->get_model_info();
-        return 1;
+        $res = 1;
     };
     
-    return 0;
+    return $res;
 }
 
 # Get server health

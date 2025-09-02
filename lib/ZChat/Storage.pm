@@ -28,14 +28,16 @@ sub load_yaml {
     
     return undef unless -e $filepath;
     
+    my $contents;
     eval {
-        return LoadFile($filepath);
+        $contents = LoadFile($filepath);
     };
     
     if ($@) {
         warn "Failed to load YAML file '$filepath': $@";
         return undef;
     }
+    $contents;
 }
 
 sub save_yaml {

@@ -6,7 +6,7 @@ use warnings;
 use utf8;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
+use lib "$FindBin::RealBin/lib";
 
 use ZChat;
 use ZChat::Storage;
@@ -68,16 +68,16 @@ my ($opt, $usage) = describe_options(
     [ 'help|h',             "This beautiful help" ],
     [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
     [ 'verbose_resp|vr+',   "Verbose response data" ],
-    [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt)" ],
+    [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt) (This is old and needs updating)" ],
     [ 'clipboard|cb',       "Use clipboard content" ],
     [ 'interactive|int|i',  "Interactive mode" ],
     [ 'echo1|e',            "Echo back initial prompt" ],
     [ 'echo-delineated|echod|ee', "Echo with <echo></echo> and <reply></reply> tags" ],
     [ 'raw|r',              "Raw output (no processing)" ],
+    [ 'tokens_full',        "Output tokens of input text" ],
     [ 'token_count|T',      "Count tokens in input text" ],
     [ 'ctx',                "Get running model n_ctx" ],
     [ 'metadata',           "Get running model metadata" ],
-    [ 'tokens_full',        "Output (of input text) full tokens with parts" ],
     [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
     [ 'play_user|pu',       "Play user text with TTS" ],
     [ 'play_resp|pr',       "Play response text with TTS" ],

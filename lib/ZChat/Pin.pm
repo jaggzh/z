@@ -81,6 +81,17 @@ sub clear_pins {
     return $self->_save_pins();
 }
 
+sub clear_pins_by_role {
+    my ($self, $role) = @_;
+    return 0 unless $role && $role =~ /^(system|user|assistant)$/;
+    $self->_load_pins();
+    my $before = scalar @{$self->{pins}};
+    $self->{pins} = [ grep { $_->{role} ne $role } @{$self->{pins}} ];
+    $self->{loaded} = 1;
+    $self->_save_pins();
+    return ($before != scalar @{$self->{pins}}) ? 1 : 0;
+}
+
 sub remove_pin {
     my ($self, $index) = @_;
     

@@ -57,6 +57,10 @@ sub load_effective_config {
             sel(2, "Setting $key '$cli_opts{$key}' from CLI options");
         }
     }
+    if (defined $cli_opts{pin_shims}) {
+        $config->{pin_shims} = $cli_opts{pin_shims};
+        sel(2, "Setting pin_shims from CLI options");
+    }
     
     $self->{effective_config} = $config;
     return $config;
@@ -145,6 +149,9 @@ sub store_user_config {
             $existing->{$key} = $opts{$key};
         }
     }
+    if (defined $opts{pin_shims}) {
+        $existing->{pin_shims} = $opts{pin_shims};
+    }
     
     sel 1, "Saving user config as YAML at: $user_config_file";
     return $self->{storage}->save_yaml($user_config_file, $existing);
@@ -171,6 +178,9 @@ sub store_session_config {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
         }
+    }
+    if (defined $opts{pin_shims}) {
+        $existing->{pin_shims} = $opts{pin_shims};
     }
     
     return $self->{storage}->save_yaml($session_config_file, $existing);

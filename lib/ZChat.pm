@@ -21,6 +21,7 @@ sub new {
         preset => $opts{preset},
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},
+        pin_shims => $opts{pin_shims},
         config => undef,
         core => undef,
         storage => undef,
@@ -71,6 +72,7 @@ sub _load_config {
         preset => $opts{preset},
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},
+        pin_shims => $opts{pin_shims},
     );
 }
 
@@ -109,8 +111,11 @@ sub _build_messages {
         sel(2, "No system content found");
     }
     
-    # 2. Add pinned messages in order
-    my $pinned_messages = $self->{pin_mgr}->build_message_array();
+    # 2. Enforce pin limits then add pinned messages (with shims)
+    my $limits = $self->{config}->get_pin_limits();
+    $self->{pin_mgr}->enforce_pin_limits($limits);
+    my $shims  = $self->{config}->get_pin_shims();
+    my $pinned_messages = $self->{pin_mgr}->build_message_array_with_shims($shims);
     if (@$pinned_messages) {
         sel(2, "Adding " . @$pinned_messages . " pinned messages");
         push @messages, @$pinned_messages;
@@ -178,6 +183,22 @@ sub _get_system_content {
     my $final_content = $content || undef;
     sel(2, $final_content ? "Final system content length: " . length($final_content) : "No final system content");
     
+    # Render Xslate variables if present
+    if ($final_content) {
+        require Text::Xslate;
+        require POSIX;
+        my $tpl = Text::Xslate->new(type=>'text', verbose=>0);
+        my $modelname = $self->{core}->get_model_info()->{name} // 'unknown-model';
+        my $now = time;
+        my $vars = {
+            datenow_ymd   => POSIX::strftime("%Y-%m-%d", localtime($now)),
+            datenow_iso   => POSIX::strftime("%Y-%m-%dT%H:%M:%S%z", localtime($now)),
+            datenow_local => scalar localtime($now),
+            modelname     => $modelname,
+        };
+        $final_content = $tpl->render_string($final_content, $vars);
+    }
+
     return $final_content;
 }
 

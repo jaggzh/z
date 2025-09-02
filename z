@@ -94,8 +94,15 @@ my ($opt, $usage) = describe_options(
     [ 'store-session|ss',   "Store preset in current session config" ],
     [ 'system=s',           "Set system prompt (overrides preset)" ],
     [ 'system-file=s',      "Set system prompt from file (overrides preset)" ],
+    [ 'thought|think',      "Do not remove reasoning sections" ],
     [],
-    [ 'Pin Management:' ],
+    [ 'Utility:' ],
+    [ 'list-presets|L',     "List available presets" ],
+    [ 'help-pins',          "Show detailed help for pinning" ],
+    [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
+
+    [],
+    [ 'Message pinning:' ],
     [ 'pin=s@',             "Add pinned message(s)" ],
     [ 'pin-file=s@',        "Add pinned message(s) from file(s)" ],
     [ 'pin-list',           "List all pinned messages" ],
@@ -107,11 +114,17 @@ my ($opt, $usage) = describe_options(
     [ 'pins-sys-max=i',     "Max system pins", { default => $def_pin_max } ],
     [ 'pins-user-max=i',    "Max user pins", { default => $def_pin_max } ],
     [ 'pins-ast-max=i',     "Max assistant pins", { default => $def_pin_max } ],
-    [ 'thought|think',      "Do not remove reasoning sections" ],
-    [],
-    [ 'Utility:' ],
-    [ 'list-presets|L',     "List available presets" ],
-    [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
+
+    [ 'pin-sys=s@',         "Add system pin(s)" ],
+    [ 'pin-user=s@',        "Add user pin(s)" ],
+    [ 'pin-ast=s@',         "Add assistant pin(s) (shorthand: ast)" ],
+    [ 'pin-ua-pipe=s@',     "Add paired user|||assistant pin(s)" ],
+    [ 'pin-ua-json=s@',     "Add paired pins from JSON object(s) with {user,assistant}" ],
+    [ 'pins-clear-user',    "Clear user pins only" ],
+    [ 'pins-clear-ast',     "Clear assistant pins only" ],
+    [ 'pins-clear-sys',     "Clear system pins only" ],
+    [ 'pin-shim=s',         "Set shim appended to user/assistant pinned messages" ],
+    [ 'help-pins',          "Show detailed help for pinning" ],
 );
 
 @ARGV = map { decode('UTF-8', $_) } @ARGV;
@@ -121,6 +134,13 @@ if ($opt->help) { print($usage->text), exit; }
 $verbose = $opt->verbose;
 set_verbose($verbose); # In Utils
 $verbose_resp = $opt->verbose_resp;
+
+if ($opt->help_pins) {
+    my $help_path = File::Spec->catfile($FindBin::RealBin, 'help', 'pins.md');
+    if (-e $help_path) { print read_text($help_path) }
+    else { say "No pins help found (expected $help_path)" }
+    exit;
+}
 
 # Parse input
 my $uprompt;
@@ -197,6 +217,7 @@ my $zchat = ZChat->new(
     system_prompt => $opt->system,
     system_file => $opt->system_file,
     verbose => $verbose,
+    pin_shims => (defined $opt->pin_shim ? { user=>$opt->pin_shim, assistant=>$opt->pin_shim } : undef),
 );
 
 # Handle utility commands first
@@ -290,6 +311,15 @@ if ($opt->pin_rm) {
     exit;
 }
 
+if ($opt->pins_clear_sys || $opt->pins_clear_user || $opt->pins_clear_ast) {
+    my $did = 0;
+    $did += $zchat->{pin_mgr}->clear_pins_by_role('system')    if $opt->pins_clear_sys;
+    $did += $zchat->{pin_mgr}->clear_pins_by_role('user')      if $opt->pins_clear_user;
+    $did += $zchat->{pin_mgr}->clear_pins_by_role('assistant') if $opt->pins_clear_ast;
+    say "Cleared role-specific pins." if $did;
+    exit;
+}
+
 if ($opt->pin_write) {
     # Format: --pin-write 0='new content'
     if ($opt->pin_write =~ /^(\d+)=(.*)$/) {
@@ -326,9 +356,40 @@ if ($opt->pin_file) {
         unless (-e $pin_file && -r $pin_file) {
             die "${bred}ERROR: Pin file not found or readable: $pin_file$rst\n";
         }
-        my $content = read_text($pin_file);
-        chomp $content;
-        $zchat->pin($content);
+        my $items = load_pipes_file($pin_file);   # ARRAY of hashes/UA pairs
+        for my $it (@$items) {
+            if (ref($it) eq 'HASH' && exists $it->{role} && exists $it->{content}) {
+                $zchat->pin($it->{content}, role => $it->{role}, method => ($it->{method}//'msg'));
+            } else {
+                # Treat as UA pair (pipes reader yields {user,assistant})
+                $zchat->pin($it->{user}, role=>'user', method=>'msg')           if defined $it->{user} && $it->{user} ne '';
+                $zchat->pin($it->{assistant}, role=>'assistant', method=>'msg') if defined $it->{assistant} && $it->{assistant} ne '';
+            }
+        }
+    }
+}
+
+# Direct role-specific pins
+for my $s (@{ $opt->pin_sys  // [] }) { $zchat->pin($s, role=>'system',    method=>'concat'); }
+for my $s (@{ $opt->pin_user // [] }) { $zchat->pin($s, role=>'user',      method=>'msg');    }
+for my $s (@{ $opt->pin_ast  // [] }) { $zchat->pin($s, role=>'assistant', method=>'msg');    }
+
+# UA pipe: "user|||assistant"
+for my $pair (@{ $opt->pin_ua_pipe // [] }) {
+    my ($u,$a) = split(/\|\|\|/, $pair, 2);
+    $u = '' unless defined $u; $a = '' unless defined $a;
+    $zchat->pin($u, role=>'user', method=>'msg')           if length $u;
+    $zchat->pin($a, role=>'assistant', method=>'msg')      if length $a;
+}
+
+# UA JSON: {"user":"...","assistant":"..."}
+for my $json (@{ $opt->pin_ua_json // [] }) {
+    my $obj = eval { JSON::XS->new->decode($json) } // {};
+    if (ref($obj) eq 'HASH') {
+        $zchat->pin($obj->{user}, role=>'user', method=>'msg')             if defined $obj->{user} && $obj->{user} ne '';
+        $zchat->pin($obj->{assistant}, role=>'assistant', method=>'msg')   if defined $obj->{assistant} && $obj->{assistant} ne '';
+    } else {
+        warn "Ignoring invalid --pin-ua-json payload";
     }
 }
 
@@ -351,6 +412,7 @@ if ($opt->store_user) {
     my %store_opts;
     $store_opts{preset} = $opt->preset if $opt->preset;
     $store_opts{session} = $opt->session if $opt->session;
+    $store_opts{pin_shims} = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
     
     # This shows Stored user config: preset.  I want it to show Stored user config: preset=> 
     $zchat->store_user_config(%store_opts);
@@ -361,6 +423,8 @@ if ($opt->store_user) {
 if ($opt->store_session) {
     my %store_opts;
     $store_opts{preset} = $opt->preset if $opt->preset;
+    $store_opts{pin_shims} = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
+
     
     $zchat->store_session_config(%store_opts);
     say "Stored session config: " . join(", ", keys %store_opts) if %store_opts;

@@ -72,8 +72,10 @@ sub get_session_dir {
     my $home = $ENV{HOME} || die "HOME environment variable not set";
     my $config_dir = File::Spec->catdir($home, '.config', 'zchat');
     my @session_parts = split('/', $session_name);
+    my $dir = File::Spec->catdir($config_dir, 'sessions', @session_parts);
+    sel 1, "get_session_dir() => " . ($dir // 'undef');
     
-    return File::Spec->catdir($config_dir, 'sessions', @session_parts);
+    return $dir;
 }
 
 sub load_history {
@@ -85,6 +87,7 @@ sub load_history {
     return [] unless $session_dir;
     
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
+    sel 1, "load_history(): History file => " . ($history_file // 'undef');
     my $history = read_json_file($history_file);
     
     return [] unless $history && ref($history) eq 'ARRAY';

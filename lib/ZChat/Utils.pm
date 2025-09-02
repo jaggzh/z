@@ -20,6 +20,10 @@ our @EXPORT_OK = qw(
 	json_pretty_from_data_min
 	read_file
 	write_file
+	split_pipestr
+	encode_pipestr_part
+	_decode_pipestring_part
+
 );
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
@@ -215,5 +219,48 @@ sub write_file($filepath, $content, $optshr={}) {
     return 1;
 }
 
+sub split_pipestr {
+    my ($line) = @_;
+    # 1) split at unescaped delimiters
+    my @parts = split /$DELIM_RE/, $line, -1;
+    # 2) unescape only pipes; leave other backslashes intact
+    # say '';
+    # say "Inputs: ", (join ', ', map { "{{$_}}" } @parts);
+    s#((\\\\)*)\\\|# ($1//'') . '|' #ge for @parts;
+    $_ = decode_singleline($_) for @parts;
+    # say "Unescaped: ", (join ', ', map { "{{$_}}" } @parts);
+    return @parts;
+}
+sub _decode_pipestring_part {
+    my ($s, $strict) = @_;
+    my ($out, $k) = ('', 0);                       # k = run length of preceding backslashes
+    for my $ch (split //, $s) {
+        if ($ch eq "\\") { ++$k; next; }
+        if ($ch eq "n" && ($k % 2)) {              # odd => last \ escapes n -> newline
+            $out .= "\\" x int($k/2);
+            $out .= "\n";
+        } else {
+            $out .= "\\" x $k;
+            $out .= $ch;
+        }
+        $k = 0;
+    }
+    if ($strict && ($k % 2)) { die "dangling backslash at EOL" }  # policy choice
+    $out .= "\\" x $k;                             # non-strict: keep trailing \ literally
+    return $out;
+}
+
+# Encode one field so it’s safe to join with '|||' and later decode:
+# 1) \\  -> \\\\   (make all literal '\' even so they never escape next char)
+# 2) |   -> \|     (no '|||' can appear)
+# 3) NL  -> \n     (visible line breaks)
+
+sub encode_pipestr_part {
+    my ($s) = @_;
+    $s =~ s/\\/\\\\/g;   # backslashes first
+    $s =~ s/\|/\\|/g;    # then pipes
+    $s =~ s/\n/\\n/g;    # then newlines
+    return $s;
+}
 
 1;

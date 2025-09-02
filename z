@@ -124,6 +124,7 @@ my ($opt, $usage) = describe_options(
     [ 'pins-clear-ast',     "Clear assistant pins only" ],
     [ 'pins-clear-sys',     "Clear system pins only" ],
     [ 'pin-shim=s',         "Set shim appended to user/assistant pinned messages" ],
+    [ 'pin-sys-mode=s',     "How to include system pins in system prompt: vars|concat|both (default: vars)" ],
 );
 
 @ARGV = map { decode('UTF-8', $_) } @ARGV;
@@ -217,6 +218,7 @@ my $zchat = ZChat->new(
     system_file => $opt->system_file,
     verbose => $verbose,
     pin_shims => (defined $opt->pin_shim ? { user=>$opt->pin_shim, assistant=>$opt->pin_shim } : undef),
+    pin_sys_mode => ($opt->pin_sys_mode // undef),
 );
 
 # Handle utility commands first

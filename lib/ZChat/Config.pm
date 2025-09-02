@@ -61,6 +61,10 @@ sub load_effective_config {
         $config->{pin_shims} = $cli_opts{pin_shims};
         sel(2, "Setting pin_shims from CLI options");
     }
+    if (defined $cli_opts{pin_sys_mode}) {
+        $config->{pin_sys_mode} = $cli_opts{pin_sys_mode};
+        sel(2, "Setting pin_sys_mode '$cli_opts{pin_sys_mode}' from CLI options");
+    }
     
     $self->{effective_config} = $config;
     return $config;
@@ -104,6 +108,7 @@ sub _get_system_defaults {
             user => '<pin-shim/>',
             assistant => '<pin-shim/>',
         },
+        pin_sys_mode => 'vars',   # how system pins are applied: vars|concat|both
     };
 }
 
@@ -152,6 +157,9 @@ sub store_user_config {
     if (defined $opts{pin_shims}) {
         $existing->{pin_shims} = $opts{pin_shims};
     }
+    if (defined $opts{pin_sys_mode}) {
+        $existing->{pin_sys_mode} = $opts{pin_sys_mode};
+    }
     
     sel 1, "Saving user config as YAML at: $user_config_file";
     return $self->{storage}->save_yaml($user_config_file, $existing);
@@ -181,6 +189,9 @@ sub store_session_config {
     }
     if (defined $opts{pin_shims}) {
         $existing->{pin_shims} = $opts{pin_shims};
+    }
+    if (defined $opts{pin_sys_mode}) {
+        $existing->{pin_sys_mode} = $opts{pin_sys_mode};
     }
     
     return $self->{storage}->save_yaml($session_config_file, $existing);
@@ -228,6 +239,11 @@ sub get_pin_limits {
 sub get_pin_shims {
     my ($self) = @_;
     return $self->{effective_config}->{pin_shims} || {};
+}
+
+sub get_pin_sys_mode {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_sys_mode} || 'vars';
 }
 
 1;

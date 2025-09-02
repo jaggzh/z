@@ -73,6 +73,7 @@ sub _load_config {
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},
         pin_shims => $opts{pin_shims},
+        pin_sys_mode => $opts{pin_sys_mode},
     );
 }
 
@@ -115,7 +116,10 @@ sub _build_messages {
     my $limits = $self->{config}->get_pin_limits();
     $self->{pin_mgr}->enforce_pin_limits($limits);
     my $shims  = $self->{config}->get_pin_shims();
-    my $pinned_messages = $self->{pin_mgr}->build_message_array_with_shims($shims);
+    my $pinned_messages = $self->{pin_mgr}->build_message_array_with_shims(
+        $shims,
+        sys_mode => ($self->{config}->get_pin_sys_mode() // 'vars'),
+    );
     if (@$pinned_messages) {
         sel(2, "Adding " . @$pinned_messages . " pinned messages");
         push @messages, @$pinned_messages;
@@ -187,6 +191,10 @@ sub _get_system_content {
     if ($final_content) {
         require Text::Xslate;
         require POSIX;
+        # Collect system pins as template vars
+        my $sys_pins_ar = $self->{pin_mgr}->get_system_pins();
+        my $pins_str    = join("\n", @$sys_pins_ar);
+ 
         my $tpl = Text::Xslate->new(type=>'text', verbose=>0);
         my $modelname = $self->{core}->get_model_info()->{name} // 'unknown-model';
         my $now = time;
@@ -195,6 +203,8 @@ sub _get_system_content {
             datenow_iso   => POSIX::strftime("%Y-%m-%dT%H:%M:%S%z", localtime($now)),
             datenow_local => scalar localtime($now),
             modelname     => $modelname,
+            pins          => $sys_pins_ar,   # array of system pin strings
+            pins_str      => $pins_str,      # "\n" joined system pins
         };
         $final_content = $tpl->render_string($final_content, $vars);
     }

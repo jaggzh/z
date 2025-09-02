@@ -180,7 +180,7 @@ sub build_message_array {
 }
 
 sub build_message_array_with_shims {
-    my ($self, $shims) = @_;
+    my ($self, $shims, %opts) = @_;
     
     $shims ||= {
         user => '<pin-shim/>',
@@ -199,7 +199,20 @@ sub build_message_array_with_shims {
             $msg->{content} .= "\n" . $shim;
         }
     }
-    
+     
+    # Optionally suppress/allow system concat per sys_mode
+    my $mode = $opts{sys_mode} // 'vars';  # vars|concat|both
+    if ($mode eq 'vars') {
+        # remove any system-pinned messages (they came from build_message_array())
+        $messages = [ grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages ];
+    } elsif ($mode eq 'concat') {
+        # keep as-is (system concat msg already present)
+    } elsif ($mode eq 'both') {
+        # keep as-is AND expose via template vars (handled in ZChat.pm)
+    } else {
+        # unknown -> default to vars behavior
+        $messages = [ grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages ];
+    }
     return $messages;
 }
 
@@ -211,6 +224,13 @@ sub get_pin_count {
     return scalar @{$self->{pins}} unless $role;
     
     return scalar grep { $_->{role} eq $role } @{$self->{pins}};
+}
+
+sub get_system_pins {
+    my ($self) = @_;
+    $self->_load_pins();
+    my @sys = map { $_->{content} } grep { $_->{role} eq 'system' } @{$self->{pins}};
+    return \@sys;
 }
 
 sub get_pins_summary {

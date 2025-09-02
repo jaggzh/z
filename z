@@ -98,11 +98,11 @@ my ($opt, $usage) = describe_options(
     [],
     [ 'Utility:' ],
     [ 'list-presets|L',     "List available presets" ],
-    [ 'help-pins',          "Show detailed help for pinning" ],
     [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
 
     [],
     [ 'Message pinning:' ],
+    [ 'help-pins',          "Show detailed help for pinning" ],
     [ 'pin=s@',             "Add pinned message(s)" ],
     [ 'pin-file=s@',        "Add pinned message(s) from file(s)" ],
     [ 'pin-list',           "List all pinned messages" ],
@@ -124,7 +124,6 @@ my ($opt, $usage) = describe_options(
     [ 'pins-clear-ast',     "Clear assistant pins only" ],
     [ 'pins-clear-sys',     "Clear system pins only" ],
     [ 'pin-shim=s',         "Set shim appended to user/assistant pinned messages" ],
-    [ 'help-pins',          "Show detailed help for pinning" ],
 );
 
 @ARGV = map { decode('UTF-8', $_) } @ARGV;

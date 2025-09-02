@@ -34,6 +34,7 @@ Below is everything you need: options (complete), quick recipes for common needs
 | `--pins-user-max` | `N` | Cap user pins (same policy). | Default 50. |
 | `--pins-ast-max` | `N` | Cap assistant pins (same policy). | Default 50. |
 | `--pin-shim` | `STR` | Append a shim to **user/assistant** pinned messages when building the request (e.g., `<pin-shim/>`). | To **persist** the shim default, combine with `-S` (store user) or `--ss` (store session). |
+| `--pin-sys-mode` | `vars|concat|both` | How system pins are included in the system prompt. `vars` (default) exposes pins as Xslate vars only; `concat` auto-appends a concatenated system-pin block; `both` does both. | Example: `z --pin-sys "A" --pin-sys "B" --pin-sys-mode vars --system 'Base <: $pins_str :>'` |
 | `--help-pins` | — | Dump this file. | `z --help-pins` |
 
 **Pipes format (txt):**  
@@ -59,7 +60,7 @@ Below is everything you need: options (complete), quick recipes for common needs
 
 ## How pins are sent (assembly order)
 
-1. **System**: preset/system file/CLI system prompt → concatenated; then **system pins** (concat).
+1. **System**: preset/system file/CLI system prompt. If `pin_sys_mode` ∈ {`concat`,`both`} a concatenated **system-pin block** is appended; regardless of mode, system pins are exposed as Xslate vars (`$pins`, `$pins_str`) when rendering the system text (default `pin_sys_mode=vars`, i.e., no auto-append).
 2. **Assistant pins**: first a concatenated block (if any), then individual assistant pin messages (`method=msg`).
 3. **User pins**: concatenated block (if any), then individual user pin messages (`method=msg`).
 4. **History**: prior turns (unless disabled).
@@ -68,8 +69,10 @@ Below is everything you need: options (complete), quick recipes for common needs
 **Limits** (`--pins-*-max`) are enforced **per role** before assembly (keep newest).
 **Shim** (`--pin-shim`) is appended to user/assistant **pinned** messages at build time (not to live turns).
 
-**Templating (system only):** Presets/system text support Xslate vars:
-`$datenow_ymd`, `$datenow_iso`, `$datenow_local`, `$modelname`.
+**Templating (system only):** Presets/system text support Xslate vars:  
+`$datenow_ymd`, `$datenow_iso`, `$datenow_local`, `$modelname`,  
+`$pins` (ARRAY of system pins), `$pins_str` (system pins joined with `\n`).  
+Use `--pin-sys-mode vars|both` to make use of `$pins`/`$pins_str` without (or alongside) auto-concatenation.
 
 ---
 
@@ -111,6 +114,30 @@ z --pin-ua-pipe 'How to match digits?|||Use \d+ with anchors.'
 ```perl
 $z->pin("How to match digits?", role=>'user', method=>'msg');
 $z->pin("Use \\d+ with anchors.", role=>'assistant', method=>'msg');
+```
+
+### 2.5) Use system pins as template vars (no auto-concat)
+
+When: you want full control over where/how system pins appear in your system prompt.
+Result: system text renders with `$pins_str` while pins are not auto-appended.
+
+**CLI**
+
+```bash
+z --pin-sys "Alpha rule" --pin-sys "Beta rule" \
+  --pin-sys-mode vars \
+  --system 'Base policy. Active rules:\n<: $pins_str :>'
+```
+
+**API**
+```perl
+my $z = ZChat->new(
+  session       => 'demo/session',
+  system_prompt => "Base policy.\nActive rules:\n<: \$pins_str :>",
+  pin_sys_mode  => 'vars',
+);
+$z->pin("Alpha rule", role=>'system', method=>'concat');
+$z->pin("Beta rule",  role=>'system', method=>'concat');
 ```
 
 ---

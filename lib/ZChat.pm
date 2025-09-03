@@ -37,6 +37,12 @@ sub new {
         storage => $self->{storage},
         session_name => $self->{session_name}
     );
+
+    # Load effective configuration
+    $self->_load_config(%opts);
+    $self->{session_name} = $self->{config}->get_session_name();
+
+    $DB::single=1;
     $self->{pin_mgr} = ZChat::Pin->new(
         storage => $self->{storage},
         session_name => $self->{session_name}
@@ -58,12 +64,38 @@ sub new {
 
     $self->{core} = ZChat::Core->new();
     
-    # Load effective configuration
-    $self->_load_config(%opts);
-    $self->{session_name} = $self->{config}->get_session_name();
-
     return $self;
 }
+
+# sub switch_session {
+#     my ($self, $target, %opts) = @_;
+#     # %opts: create_if_missing=>0/1, dry_run=>0/1, allowlist=>[...], source=>"cli|agent|api"
+
+#     _validate_session_name($target, \%opts);       # sanitize & policy checks
+#     return { ok=>1, would=>_diff_for($target) } if $opts{dry_run};
+
+#     $self->_flush_all_pending();                   # pins/history/etc for current
+#     my $guard = $self->{storage}->acquire_global_lock(); # prevent races
+
+#     my $exists = $self->{storage}->session_exists($target);
+#     if (!$exists) {
+#         die "No such session" unless $opts{create_if_missing};
+#         $self->{storage}->init_session($target);   # mkdirs, seed files atomically
+#     }
+
+#     $self->{config}->set_override(session_name => $target);
+#     $self->_load_config();                         # recompute effective config
+
+#     # propagate to dependents (single source of truth = get_session_name)
+#     my $sn = $self->{config}->get_session_name();
+#     $self->{pin_mgr}->set_session_name($sn);
+#     $self->{preset_mgr}->set_session_name($sn);
+#     # storage APIs should take session as an arg, but also record current for convenience
+#     $self->{storage}->set_current_session($sn);
+
+#     $guard->release();
+#     return { ok=>1, session=>$sn };
+# }
 
 sub _load_config {
     my ($self, %opts) = @_;

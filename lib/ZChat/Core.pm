@@ -156,7 +156,6 @@ sub _stream_completion {
     }
     
     # Ensure newline at end
-    $DB::single=1;
     print "\n" if $answer && $answer !~ /\n$/;
     
     return $answer;

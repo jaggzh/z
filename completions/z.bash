@@ -100,6 +100,10 @@ __z_opts() {
 --store-session --ss
 --system
 --system-file
+--think --thought
+-L --list-presets
+--fallbacks-ok
+--help-pins
 --pin
 --pin-file
 --pin-list
@@ -111,9 +115,17 @@ __z_opts() {
 --pins-sys-max
 --pins-user-max
 --pins-ast-max
---think --thought
--L --list-presets
---fallbacks-ok
+--pin-sys
+--pin-user
+--pin-ast
+--pin-ua-pipe
+--pin-ua-json
+--pins-clear-user
+--pins-clear-ast
+--pins-clear-sys
+--pin-shim
+--pin-sys-mode
+--help-sys-pin-vars
 OPTS
 }
 

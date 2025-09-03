@@ -124,7 +124,8 @@ my ($opt, $usage) = describe_options(
     [ 'pins-clear-ast',     "Clear assistant pins only" ],
     [ 'pins-clear-sys',     "Clear system pins only" ],
     [ 'pin-shim=s',         "Set shim appended to user/assistant pinned messages" ],
-    [ 'pin-sys-mode=s',     "How to include system pins in system prompt: vars|concat|both (default: vars)" ],
+    [ 'pin-sys-mode=s',     "How to include system pins in system prompt: vars|concat|both (default: vars) (eg. <: \$pins_str :> or use array in pins" ],
+    [ 'help-sys-pin-vars',  "Show a quick example of template vars to use for system pins", ],
 );
 
 @ARGV = map { decode('UTF-8', $_) } @ARGV;
@@ -139,6 +140,24 @@ if ($opt->help_pins) {
     my $help_path = File::Spec->catfile($FindBin::RealBin, 'help', 'pins.md');
     if (-e $help_path) { print read_text($help_path) }
     else { say "No pins help found (expected $help_path)" }
+    exit;
+}
+
+if ($opt->help_sys_pin_vars) {
+    print <<~'EOT';
+
+        === For accessing as an array ($pins) ===
+        <: $pins.size ? '## Pinned Rules\n' : '' :>
+        : if $pins.size {
+        :   for $pins -> $x {
+        * <: $x :>
+        :   }
+        : }
+
+        === Using the concatenated string version ($pins_str) ===
+        ## Pinned Rules
+        <: $pins_str :>
+        EOT
     exit;
 }
 
@@ -402,7 +421,7 @@ if ($opt->wipe) {
         say "No-history mode - wiping only in memory.";
     } else {
         # Clear history through storage
-        $zchat->{storage}->save_history($zchat->{session_name}, []);
+        $zchat->{storage}->save_history($zchat->get_session_name(), []);
         sel 1, "${yel}Conversation history wiped.$rst";
     }
     exit unless defined $uprompt;
@@ -411,6 +430,7 @@ if ($opt->wipe) {
 # Storage operations
 if ($opt->store_user) {
     my %store_opts;
+    $DB::single=1;
     $store_opts{preset} = $opt->preset if $opt->preset;
     $store_opts{session} = $opt->session if $opt->session;
     $store_opts{pin_shims} = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
@@ -436,7 +456,7 @@ if ($opt->edit_hist) {
     die "Input-only mode - editing makes no sense\n" if $opt->input_only;
     die "No-history mode - editing makes no sense\n" if $opt->no_history;
     
-    my $session_name = $zchat->{session_name} || 'default';
+    my $session_name = $zchat->get_session_name();
     my $session_dir = $zchat->{storage}->get_session_dir($session_name);
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
     
@@ -457,7 +477,7 @@ if (!$intmode || $opt->no_color) {
 }
 
 # Show session info
-sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . ($zchat->get_session_name() || 'default') . "$rst";
+sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . $zchat->get_session_name() . "$rst";
 sel 1, "${clr_notice_bg}${clr_notice_fg}Preset: " . ($zchat->get_preset() || 'none') . "$rst";
 
 # Terminal setup for interactive mode
@@ -525,7 +545,7 @@ while (1) {
         
         # Save to history (unless disabled)
         unless ($opt->no_history || $opt->input_only) {
-            $zchat->{storage}->append_to_history($zchat->{session_name}, $uprompt, $response);
+            $zchat->{storage}->append_to_history($zchat->get_session_name(), $uprompt, $response);
         }
     }
     

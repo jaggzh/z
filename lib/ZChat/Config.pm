@@ -88,7 +88,7 @@ sub _resolve_session_name {
 
 sub get_session_name {
     my ($self) = @_;
-    return $self->{effective_config}->{session} || 'default';
+    return $self->{effective_config}->{session} // 'default';
 }
 
 sub _get_system_defaults {

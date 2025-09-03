@@ -18,6 +18,8 @@ sub new {
     return $self;
 }
 
+sub set_session_name { my ($self,$n)=@_; $self->{session_name}=$n; }
+
 sub _load_pins {
     my ($self) = @_;
     

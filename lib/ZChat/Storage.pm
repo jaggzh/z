@@ -29,6 +29,7 @@ sub load_yaml {
     return undef unless -e $filepath;
     
     my $contents;
+    sel 2, " Loading a YAML file: $filepath";
     eval {
         $contents = LoadFile($filepath);
     };
@@ -49,6 +50,7 @@ sub save_yaml {
     
     my $old_umask = umask($self->{umask});
     
+    sel 2, " Saving a YAML file: $filepath";
     eval {
         DumpFile($filepath, $data);
     };
@@ -135,6 +137,7 @@ sub save_history {
     # Add final entry
     push @entries, $current_entry if keys %$current_entry;
     
+    sel 1, "Saving history to: $history_file";
     write_json_file($history_file, \@entries, { min=>1 });
 }
 
@@ -158,6 +161,7 @@ sub append_to_history {
         assistant => $assistant_response,
     };
     
+    sel 1, "Appending to history file: $history_file";
     return write_json_file($history_file, $history, { min=>1 });
 }
 
@@ -171,6 +175,7 @@ sub load_pins {
     return [] unless $session_dir;
     
     my $pins_file = File::Spec->catfile($session_dir, 'pins.yaml');
+    sel 1, "Loading pins from $pins_file";
     my $pin_data = $self->load_yaml($pins_file);
     
     return $pin_data ? ($pin_data->{pins} || []) : [];
@@ -179,6 +184,7 @@ sub load_pins {
 sub save_pins {
     my ($self, $session_name, $pins) = @_;
     
+    $DB::single=1;
     return 0 unless $session_name;
     
     my $session_dir = $self->get_session_dir($session_name);
@@ -195,6 +201,7 @@ sub save_pins {
     $existing->{pins} = $pins;
     $existing->{created} = time() unless exists $existing->{created};
     
+    sel 1, "Saving pins to $pins_file";
     return $self->save_yaml($pins_file, $existing);
 }
 
@@ -225,6 +232,7 @@ sub create_session_if_needed {
         my $initial_config = {
             created => time(),
         };
+		sel 1, "Saving session to: $session_config_file";
         $self->save_yaml($session_config_file, $initial_config);
     }
     

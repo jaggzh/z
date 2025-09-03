@@ -212,7 +212,7 @@ sub write_file($filepath, $content, $optshr={}) {
     umask($old_umask) if defined $umask; # Revert only if set
     
     if ($@) {
-        warn "Failed to write file '$filepath': $@";
+        warn "Error writing file: '$filepath': $@";
         return 0;
     }
     

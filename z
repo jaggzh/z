@@ -86,15 +86,19 @@ my ($opt, $usage) = describe_options(
     [ 'grammar|g=s',        "Force a grammar" ],
     [ 'preset|p|t=s',       "Use this preset (was -t tasktype in old version)" ],
     [ 'session|n=s',        "Session name (slash-separated path)" ],
-    [ 'wipe|w',             "Wipe conversation history" ],
-    [ 'no-history|H',       "Do not use history (no load, no store)" ],
-    [ 'input-only|I',       "Use history BUT do not write to it" ],
-    [ 'edit-hist|eh|E',     "Edit history in $editor" ],
     [ 'store-user|su|S',    "Store preset/session in user global config" ],
     [ 'store-session|ss',   "Store preset in current session config" ],
     [ 'system=s',           "Set system prompt (overrides preset)" ],
     [ 'system-file=s',      "Set system prompt from file (overrides preset)" ],
     [ 'thought|think',      "Do not remove reasoning sections" ],
+    [],
+    [ 'History:' ],
+    [ 'wipe|w',             "Wipe conversation history" ],
+    [ 'no-history|H',       "Do not use history (no load, no store)" ],
+    [ 'input-only|I',       "Use history BUT do not write to it" ],
+    [ 'edit-hist|eh|E',     "Edit history in $editor" ],
+    [ 'owrite-last=s',      "Overwrite last history message for role (u|user|a|assistant) with current prompt" ],
+    [ 'output-last|conv1|c1=s', "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
     [],
     [ 'Utility:' ],
     [ 'list-presets|L',     "List available presets" ],
@@ -461,6 +465,54 @@ if ($opt->edit_hist) {
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
     
     system($editor, '--', $history_file);
+    exit;
+}
+
+# Overwrite last message for a specific role (does not affect pins)
+if (my $role_to_overwrite = $opt->owrite_last) {
+    die "Input-only was selected (-I). Overwriting it makes no sense.\n" if $opt->input_only;
+    die "No-history was selected (-H). Overwriting it makes no sense.\n" if $opt->no_history;
+    die "--owrite-last requires a prompt (from stdin or arguments) to use as the new content.\n"
+        unless defined $uprompt && $uprompt ne '';
+
+    $role_to_overwrite = 'user'      if $role_to_overwrite eq 'u';
+    $role_to_overwrite = 'assistant' if $role_to_overwrite eq 'a';
+    die "--owrite-last must be one of: (u|user|a|assistant).\n"
+        unless $role_to_overwrite =~ /^(user|assistant)$/;
+
+    my $session_name = $zchat->get_session_name();
+    my $messages = $zchat->{storage}->load_history($session_name);
+    die "Cannot --owrite-last: conversation history is empty.\n" unless @$messages;
+
+    my $idx;
+    for (my $i = $#$messages; $i >= 0; $i--) {
+        if ($messages->[$i]{role} && $messages->[$i]{role} eq $role_to_overwrite) { $idx = $i; last; }
+    }
+    die "No '$role_to_overwrite' message found to overwrite.\n" unless defined $idx;
+
+    $messages->[$idx]{content} = $uprompt;
+    $zchat->{storage}->save_history($session_name, $messages);
+    sel 1, "Successfully overwrote last '$role_to_overwrite' message in history.";
+    exit;
+}
+
+# Output last message content (to stdout or a file)
+if (defined $opt->output_last) {
+    my $session_name = $zchat->get_session_name();
+    my $messages = $zchat->{storage}->load_history($session_name);
+    die "Conversation history is empty; nothing to output.\n" unless @$messages;
+
+    my $last = $messages->[-1]{content} // '';
+    my $dest = $opt->output_last;
+
+    if ($dest eq '-') {
+        print $last;
+    } else {
+        my $path = ($dest =~ /^-(.+)$/) ? $1 : $dest;
+        write_file($path, $last, { umask=>0177, makepath=>1 })
+            or die "Error writing last message to '$path'\n";
+        sel 1, "Wrote last message to $path";
+    }
     exit;
 }
 

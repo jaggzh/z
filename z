@@ -434,10 +434,12 @@ if ($opt->wipe) {
 # Storage operations
 if ($opt->store_user) {
     my %store_opts;
-    $DB::single=1;
     $store_opts{preset} = $opt->preset if $opt->preset;
     $store_opts{session} = $opt->session if $opt->session;
     $store_opts{pin_shims} = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
+
+    $store_opts{system_prompt} = $opt->system if defined $opt->system;
+    $store_opts{system_file}   = $opt->system_file if defined $opt->system_file;
     
     # This shows Stored user config: preset.  I want it to show Stored user config: preset=> 
     $zchat->store_user_config(%store_opts);
@@ -450,7 +452,9 @@ if ($opt->store_session) {
     $store_opts{preset} = $opt->preset if $opt->preset;
     $store_opts{pin_shims} = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
 
-    
+    $store_opts{system_prompt} = $opt->system if defined $opt->system;
+    $store_opts{system_file}   = $opt->system_file if defined $opt->system_file;
+
     $zchat->store_session_config(%store_opts);
     say "Stored session config: " . join(", ", keys %store_opts) if %store_opts;
     exit unless defined $uprompt;

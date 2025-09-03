@@ -160,7 +160,14 @@ sub store_user_config {
     if (defined $opts{pin_sys_mode}) {
         $existing->{pin_sys_mode} = $opts{pin_sys_mode};
     }
-    
+
+    # Allow storing system prompt/file at user level too
+    for my $key (qw(system_prompt system_file)) {
+        if (defined $opts{$key}) {
+            $existing->{$key} = $opts{$key};
+        }
+    }
+
     sel 1, "Saving user config as YAML at: $user_config_file";
     return $self->{storage}->save_yaml($user_config_file, $existing);
 }
@@ -278,3 +285,5 @@ Handles configuration loading and storage with proper precedence:
 system defaults → user config → session config → CLI overrides
 
 =cut
+
+# vim: et

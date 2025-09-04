@@ -1,5 +1,7 @@
 # ZChat - Modular LLM Interface with Session Management
 
+**Warning:** This whole project is a rewrite of my `z` script as a full module *and* script. **I don't guarantee anything.**
+
 <!--
 <div align="center">
   <em>Main interface showing interactive mode with pinned messages</em><br>

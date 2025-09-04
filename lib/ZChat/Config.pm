@@ -50,13 +50,27 @@ sub load_effective_config {
         }
     }
     
-    # 4. CLI overrides (runtime only)
-    for my $key (qw(preset system_prompt system_file)) {
+    # Record source-specific copies for precedence resolution
+    $config->{system_file_user}    = $user_config->{system_file}       if $user_config && defined $user_config->{system_file};
+    $config->{system_prompt_user}  = $user_config->{system_prompt}     if $user_config && defined $user_config->{system_prompt};
+    if ($effective_session) {
+        my $session_config = $self->_load_session_config() || {};
+        $config->{system_file_session}   = $session_config->{system_file}   if defined $session_config->{system_file};
+        $config->{system_prompt_session} = $session_config->{system_prompt} if defined $session_config->{system_prompt};
+    }
+    
+    # 4. CLI overrides (runtime only) — keep originals *and* stash source-marked copies
+    for my $key (qw(system_prompt system_file)) {
         if (defined $cli_opts{$key}) {
             $config->{$key} = $cli_opts{$key};
             sel(2, "Setting $key '$cli_opts{$key}' from CLI options");
         }
     }
+    $config->{_cli_system_prompt} = $cli_opts{system_prompt} if defined $cli_opts{system_prompt};
+    $config->{_cli_system_file}   = $cli_opts{system_file}   if defined $cli_opts{system_file};
+    $config->{preset} = $cli_opts{preset} if defined $cli_opts{preset};
+
+    # Preserve pin_shims / pin_sys_mode CLI handling (was lost)
     if (defined $cli_opts{pin_shims}) {
         $config->{pin_shims} = $cli_opts{pin_shims};
         sel(2, "Setting pin_shims from CLI options");
@@ -65,7 +79,9 @@ sub load_effective_config {
         $config->{pin_sys_mode} = $cli_opts{pin_sys_mode};
         sel(2, "Setting pin_sys_mode '$cli_opts{pin_sys_mode}' from CLI options");
     }
-    
+    $config->{_cli_pin_shims}   = $cli_opts{pin_shims}   if defined $cli_opts{pin_shims};
+    $config->{_cli_pin_sys_mode}= $cli_opts{pin_sys_mode}if defined $cli_opts{pin_sys_mode};
+
     $self->{effective_config} = $config;
     return $config;
 }

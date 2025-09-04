@@ -42,7 +42,6 @@ sub new {
     $self->_load_config(%opts);
     $self->{session_name} = $self->{config}->get_session_name();
 
-    $DB::single=1;
     $self->{pin_mgr} = ZChat::Pin->new(
         storage => $self->{storage},
         session_name => $self->{session_name}
@@ -178,61 +177,70 @@ sub _build_messages {
     return \@messages;
 }
 
+sub _select_system_source {
+    my ($self) = @_;
+    my $cfg = $self->{config}->get_effective_config();
+
+    # Determine source precedence: CLI > session > user > preset
+    my %src = (
+        cli     => { file => $cfg->{_cli_system_file},  prompt => $cfg->{_cli_system_prompt} },
+        session => { file => $cfg->{system_file_session}, prompt => $cfg->{system_prompt_session} },
+        user    => { file => $cfg->{system_file_user},   prompt => $cfg->{system_prompt_user} },
+    );
+
+    # Prefer file over prompt at the same level
+    for my $level (qw(cli session user)) {
+        if ($src{$level}{file}) {
+            return ($level, file   => $src{$level}{file});
+        }
+        if ($src{$level}{prompt}) {
+            return ($level, prompt => $src{$level}{prompt});
+        }
+    }
+    return ('preset', preset => $cfg->{preset}); # fallback
+}
+
 sub _get_system_content {
     my ($self) = @_;
     
-    my $config = $self->{config}->get_effective_config();
+    my ($level, $kind, $val) = $self->_select_system_source();
     my $content = '';
     
-    # If an explicit system prompt/file is configured at any level, it overrides preset content.
-    my $has_override = ($config->{system_file} || $config->{system_prompt}) ? 1 : 0;
-    $DB::single=1;
-    
-    # From preset (only if no explicit system prompt/file)
-    if (!$has_override && $config->{preset}) {
-        sel(2, "Attempting to resolve preset: '$config->{preset}'");
-        my $preset_content = $self->{preset_mgr}->resolve_preset($config->{preset});
-        if ($preset_content) {
-            sel(2, "Got preset content, length: " . length($preset_content));
-            $content .= $preset_content;
+    if ($level eq 'preset') {
+        if ($val) {
+            sel(2, "Selected system content from PRESET: '$val'");
+            my $preset_content = $self->{preset_mgr}->resolve_preset($val);
+            if ($preset_content) {
+                sel(2, "Got preset content, length: " . length($preset_content));
+                $content = $preset_content;
+            } else {
+                sel(2, "Preset '$val' not found; empty system content");
+            }
         } else {
-            sel(2, "Preset resolution returned empty/undef");
+            sel(2, "No preset configured; empty system content");
         }
-    } elsif (!$has_override) {
-        sel(2, "No preset configured");
     } else {
-        sel(2, "Using explicit system prompt/file; preset suppressed");
-    }
-    
-    # From system file (takes precedence over preset when present)
-    if ($config->{system_file}) {
-        sel(2, "Loading system file: '$config->{system_file}'");
-        my $file_content = read_file($config->{system_file});
-        if ($file_content) {
-            sel(2, "Got file content, length: " . length($file_content));
-            $content .= ($content eq '' ? '' : "\n") . $file_content;
-        } else {
-            sel(2, "System file read returned empty/undef");
+        if ($kind eq 'file') {
+            sel(2, sprintf "Selected system content from %s: system_file=%s (overrides lower levels)", uc($level), $val);
+            my $file_content = read_file($val);
+            $content = defined $file_content ? $file_content : '';
+            sel(2, "Loaded system file length: " . length($content));
+        } else { # prompt
+            my $len = defined($val) ? length($val) : 0;
+            sel(2, sprintf "Selected system content from %s: system_prompt (len=%d) (overrides lower levels)", uc($level), $len);
+            $content = $val // '';
         }
     }
-    
-    # From direct system prompt (takes precedence over preset when present)
-    if ($config->{system_prompt}) {
-        sel(2, "Using direct system prompt, length: " . length($config->{system_prompt}));
-        $content .= ($content eq '' ? '' : "\n") . $config->{system_prompt};
-    }
-    
-    my $final_content = $content || undef;
-    sel(2, $final_content ? "Final system content length: " . length($final_content) : "No final system content");
-    
-    # Render Xslate variables if present
-    if ($final_content) {
+
+    my $final = $content ne '' ? $content : undef;
+    sel(2, $final ? "Final system content length: " . length($final) : "No final system content");
+
+    if ($final) {
         require Text::Xslate;
         require POSIX;
         # Collect system pins as template vars
         my $sys_pins_ar = $self->{pin_mgr}->get_system_pins();
         my $pins_str    = join("\n", @$sys_pins_ar);
- 
         my $tpl = Text::Xslate->new(type=>'text', verbose=>0);
         my $modelname = $self->{core}->get_model_info()->{name} // 'unknown-model';
         my $now = time;
@@ -244,10 +252,10 @@ sub _get_system_content {
             pins          => $sys_pins_ar,   # array of system pin strings
             pins_str      => $pins_str,      # "\n" joined system pins
         };
-        $final_content = $tpl->render_string($final_content, $vars);
+        $final = $tpl->render_string($final, $vars);
     }
 
-    return $final_content;
+    return $final;
 }
 
 sub _manage_context {

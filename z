@@ -226,7 +226,7 @@ if ($opt->image) {
 
         my $image_id = (@{$opt->image} == 1) ? 'img' : "img-" . ($index + 1);
         my $ora = a24fg(255,128,30);
-        say "${ora}Attaching image ${whi}$image_id$ora, Base64 len: " . length($base64_image);
+        sel 1, "${ora}Attaching image ${whi}$image_id$ora, Base64 len: " . length($base64_image);
         
         push @image_data, { id => $image_id, data => $base64_image };
     }
@@ -314,7 +314,7 @@ if ($opt->pin_sum) {
 
 if ($opt->pin_clear) {
     $zchat->clear_pins();
-    say "All pins cleared.";
+    sel 1, "All pins cleared.";
     exit;
 }
 
@@ -331,7 +331,7 @@ if ($opt->pin_rm) {
             warn "Failed to remove pin at index $index";
         }
     }
-    say "Removed $removed pin(s).";
+    sel 1, "Removed $removed pin(s).";
     exit;
 }
 
@@ -340,7 +340,7 @@ if ($opt->pins_clear_sys || $opt->pins_clear_user || $opt->pins_clear_ast) {
     $did += $zchat->{pin_mgr}->clear_pins_by_role('system')    if $opt->pins_clear_sys;
     $did += $zchat->{pin_mgr}->clear_pins_by_role('user')      if $opt->pins_clear_user;
     $did += $zchat->{pin_mgr}->clear_pins_by_role('assistant') if $opt->pins_clear_ast;
-    say "Cleared role-specific pins." if $did;
+    sel 1, "Cleared role-specific pins." if $did;
     exit;
 }
 
@@ -358,7 +358,7 @@ if ($opt->pin_write) {
                 role => $pins->[$index]{role},
                 method => $pins->[$index]{method}
             );
-            say "Pin $index updated.";
+            sel 1, "Pin $index updated.";
         } else {
             die "Pin index $index does not exist\n";
         }
@@ -416,19 +416,23 @@ for my $json (@{ $opt->pin_ua_json // [] }) {
         warn "Ignoring invalid --pin-ua-json payload";
     }
 }
+$DB::single=1;
 
 # History management
 if ($opt->wipe) {
     if ($opt->input_only) {
-        say "Input-only mode - wiping only in memory.";
+        # This may be unexpected behavior so notify
+        sel 0, "Input-only mode - wiping only in memory.";
     } elsif ($opt->no_history) {
-        say "No-history mode - wiping only in memory.";
+        # This may be unexpected behavior so notify
+        sel 0, "No-history mode - wiping only in memory.";
     } else {
         # Clear history through storage
+        $DB::single=1;
         $zchat->{storage}->save_history($zchat->get_session_name(), []);
         sel 1, "${yel}Conversation history wiped.$rst";
     }
-    exit unless defined $uprompt;
+    # exit unless defined $uprompt; # Other options might still be functioning even if wipe was done (like storing settings), so don't exit.
 }
 
 # Storage operations
@@ -442,9 +446,9 @@ if ($opt->store_user) {
     $store_opts{system_file}   = $opt->system_file if defined $opt->system_file;
     
     # This shows Stored user config: preset.  I want it to show Stored user config: preset=> 
+    $DB::single=1;
     $zchat->store_user_config(%store_opts);
-    sel(1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } keys %store_opts)) if %store_opts;
-    exit unless defined $uprompt;
+    sel 1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } keys %store_opts) if %store_opts;
 }
 
 if ($opt->store_session) {
@@ -456,20 +460,7 @@ if ($opt->store_session) {
     $store_opts{system_file}   = $opt->system_file if defined $opt->system_file;
 
     $zchat->store_session_config(%store_opts);
-    say "Stored session config: " . join(", ", keys %store_opts) if %store_opts;
-    exit unless defined $uprompt;
-}
-
-if ($opt->edit_hist) {
-    die "Input-only mode - editing makes no sense\n" if $opt->input_only;
-    die "No-history mode - editing makes no sense\n" if $opt->no_history;
-    
-    my $session_name = $zchat->get_session_name();
-    my $session_dir = $zchat->{storage}->get_session_dir($session_name);
-    my $history_file = File::Spec->catfile($session_dir, 'history.json');
-    
-    system($editor, '--', $history_file);
-    exit;
+    sel 1, "Stored session config: " . join(", ", keys %store_opts) if %store_opts;
 }
 
 # Overwrite last message for a specific role (does not affect pins)
@@ -500,8 +491,22 @@ if (my $role_to_overwrite = $opt->owrite_last) {
     exit;
 }
 
+if ($opt->edit_hist) {
+    die "Input-only mode - editing makes no sense\n" if $opt->input_only;
+    die "No-history mode - editing makes no sense\n" if $opt->no_history;
+    
+    my $session_name = $zchat->get_session_name();
+    my $session_dir = $zchat->{storage}->get_session_dir($session_name);
+    my $history_file = File::Spec->catfile($session_dir, 'history.json');
+    
+    system($editor, '--', $history_file);
+    exit;
+}
+
 # Output last message content (to stdout or a file)
 if (defined $opt->output_last) {
+    die "ERROR: Request for --output-last while also providing a query. We don't know how to resolve the mixed output. Aborting."
+        if defined $uprompt;
     my $session_name = $zchat->get_session_name();
     my $messages = $zchat->{storage}->load_history($session_name);
     die "Conversation history is empty; nothing to output.\n" unless @$messages;

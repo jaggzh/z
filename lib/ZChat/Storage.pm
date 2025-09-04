@@ -184,7 +184,6 @@ sub load_pins {
 sub save_pins {
     my ($self, $session_name, $pins) = @_;
     
-    $DB::single=1;
     return 0 unless $session_name;
     
     my $session_dir = $self->get_session_dir($session_name);

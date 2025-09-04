@@ -184,8 +184,12 @@ sub _get_system_content {
     my $config = $self->{config}->get_effective_config();
     my $content = '';
     
-    # From preset
-    if ($config->{preset}) {
+    # If an explicit system prompt/file is configured at any level, it overrides preset content.
+    my $has_override = ($config->{system_file} || $config->{system_prompt}) ? 1 : 0;
+    $DB::single=1;
+    
+    # From preset (only if no explicit system prompt/file)
+    if (!$has_override && $config->{preset}) {
         sel(2, "Attempting to resolve preset: '$config->{preset}'");
         my $preset_content = $self->{preset_mgr}->resolve_preset($config->{preset});
         if ($preset_content) {
@@ -194,26 +198,28 @@ sub _get_system_content {
         } else {
             sel(2, "Preset resolution returned empty/undef");
         }
-    } else {
+    } elsif (!$has_override) {
         sel(2, "No preset configured");
+    } else {
+        sel(2, "Using explicit system prompt/file; preset suppressed");
     }
     
-    # From system file
+    # From system file (takes precedence over preset when present)
     if ($config->{system_file}) {
         sel(2, "Loading system file: '$config->{system_file}'");
         my $file_content = read_file($config->{system_file});
         if ($file_content) {
             sel(2, "Got file content, length: " . length($file_content));
-            $content .= "\n" . $file_content;
+            $content .= ($content eq '' ? '' : "\n") . $file_content;
         } else {
             sel(2, "System file read returned empty/undef");
         }
     }
     
-    # From direct system prompt
+    # From direct system prompt (takes precedence over preset when present)
     if ($config->{system_prompt}) {
         sel(2, "Using direct system prompt, length: " . length($config->{system_prompt}));
-        $content .= "\n" . $config->{system_prompt};
+        $content .= ($content eq '' ? '' : "\n") . $config->{system_prompt};
     }
     
     my $final_content = $content || undef;

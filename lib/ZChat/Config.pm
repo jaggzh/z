@@ -31,9 +31,9 @@ sub load_effective_config {
     
     # 2. User global config
     my $user_config = $self->_load_user_config();
-    if ($user_config && $user_config->{preset}) {
+    if ($user_config) {
         %$config = (%$config, %$user_config);
-        sel(2, "Setting preset '$config->{preset}' from user config");
+        sel(2, "Loaded user config overrides");
     }
     
     # 3. Session config  
@@ -44,9 +44,9 @@ sub load_effective_config {
     if ($effective_session) {
         $self->{session_name} = $effective_session;
         my $session_config = $self->_load_session_config();
-        if ($session_config && $session_config->{preset}) {
+        if ($session_config) {
             %$config = (%$config, %$session_config);
-            sel(2, "Setting preset '$config->{preset}' from session config");
+            sel(2, "Loaded session config overrides");
         }
     }
     
@@ -119,7 +119,7 @@ sub _load_user_config {
     my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
     sel 1, "Loading User config file: $user_config_file";
     my $yaml = $self->{storage}->load_yaml($user_config_file);
-    sel 1, "  YAML result: ", ($yaml // 'unable to load');
+    sel 2, "  YAML result: ", ($yaml // 'unable to load');
     return $yaml;
 }
 
@@ -132,7 +132,7 @@ sub _load_session_config {
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
     sel 1, "Loading Session config file: $session_config_file";
     my $yaml = $self->{storage}->load_yaml($session_config_file);
-    sel 1, "  YAML result: ", ($yaml // 'unable to load');
+    sel 2, "  YAML result: ", ($yaml // 'unable to load');
     
     return $yaml;
 }
@@ -149,7 +149,7 @@ sub store_user_config {
     my $existing = $self->_load_user_config() || {};
     
     # Update with new values
-    for my $key (qw(preset session)) {
+    for my $key (qw(preset session system_prompt system_file)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
         }

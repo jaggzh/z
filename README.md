@@ -249,7 +249,7 @@ use ZChat;
 
 # Basic usage
 my $z = ZChat->new();
-my $response = $z->complete("Generate a haiku about programming");
+my $response = $z->query("Generate a haiku about programming");
 
 # With session and configuration
 my $z = ZChat->new(
@@ -264,7 +264,7 @@ $z->pin("Use bullet points for key findings", role => 'user');
 
 # Multiple completions in same context
 for my $data_file (@files) {
-    my $analysis = $z->complete("Analyze this data: $data_file");
+    my $analysis = $z->query("Analyze this data: $data_file");
     save_report($data_file, $analysis);
 }
 ```
@@ -431,7 +431,7 @@ $z->pin("Include key metrics and recommendations");
 
 for my $department (@departments) {
     my $data = load_department_data($department);
-    my $report = $z->complete("Analyze this department data: $data");
+    my $report = $z->query("Analyze this department data: $data");
     save_report($department, $report);
 }
 ```

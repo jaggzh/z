@@ -1,6 +1,10 @@
 package ZChat::Config;
-use v5.34;
+use v5.26.3;
+use feature 'say';
+use experimental 'signatures';
+use strict;
 use warnings;
+
 use utf8;
 use File::Spec;
 use Cwd qw(abs_path);

@@ -1,10 +1,14 @@
 #!/usr/bin/perl
+# Re-run in debugger if...
 exec($^X, '-d', "$0", grep {!/^--debug$/} @ARGV) if grep {/^--debug$/} @ARGV;
 
-use v5.34;
+use v5.26.3;
+use feature 'say';
+use experimental 'signatures';
+use strict;
 use warnings;
-use utf8;
 
+use utf8;
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 
@@ -596,7 +600,7 @@ if (defined $opt->owrite_last && length($opt->owrite_last)) {
              : ($opt->owrite_last =~ /^(a|assistant)$/i) ? 'assistant'
              : die "owrite-last expects u|user|a|assistant";
     die "Invalid to both call --owrite-last and provide a query.\n"
-        if defined $uquery;
+        if defined $uprompt;
     sel 1, "Overwriting last message from role '$role'";
     $zchat->history_owrite_last($uprompt, { role => $role });
     exit;
@@ -604,10 +608,10 @@ if (defined $opt->owrite_last && length($opt->owrite_last)) {
 
 # Output last message content helper
 if (defined $opt->output_last && length($opt->output_last)) {
+    die "Currently we consider it invalid to both --output-last AND provide a query.\n"
+		if defined $uprompt;
     my $last = $zchat->history->get_last(role => 'assistant');
     my $text = $last ? ($last->{content} // '') : '';
-    die "Currently we consider it invalid to both --output-last AND provide a query.\n"
-		if defined $uquery;
     if ($opt->output_last eq '-') {
         print $text;
     } else {
@@ -621,9 +625,7 @@ if (defined $opt->output_last && length($opt->output_last)) {
 if (defined $uprompt && length $uprompt) {
     tts_str($uprompt) if $opt->play_user;
     my $response = $zchat->query($uprompt);
-    say $response;
-    # optional: audio playback of the response (your existing playback function)
-    if ($opt->speak || $opt->audio) {
+    if ($opt->play_resp) {
         eval { play_tts($response) };   # or whatever your fn is called
         warn "Audio error: $@" if $@;
     }

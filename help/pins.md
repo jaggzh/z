@@ -347,7 +347,7 @@ $z->pin("Assume inputs are Perl.", role=>'user', method=>'msg');
 $z->{pin_mgr}->enforce_pin_limits({ system=>5, user=>10, assistant=>5 });
 
 # 4) Ask a question (pins + history + this input)
-my $answer = $z->complete("Give a short example of a regex for integers.");
+my $answer = $z->query("Give a short example of a regex for integers.");
 say "\n---\n$answer\n";
 
 # 5) Inspect

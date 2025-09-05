@@ -1,6 +1,10 @@
 package ZChat;
-use v5.34;
+use v5.26.3;
+use feature 'say';
+use experimental 'signatures';
+use strict;
 use warnings;
+
 use utf8;
 use File::Spec;
 
@@ -124,7 +128,7 @@ sub complete {
 }
 
 sub _build_messages {
-    my ($self, $user_input, %opts) = @_;
+    my ($self, $user_input, $opts) = @_;
     
     my @messages;
     
@@ -318,8 +322,8 @@ sub _manage_context {
 
 # Pin management methods
 sub pin {
-    my ($self, $content, %opts) = @_;
-    return $self->{pin_mgr}->add_pin($content, %opts);
+    my ($self, $content, $opts) = @_;
+    return $self->{pin_mgr}->add_pin($content, $opts);
 }
 
 sub list_pins {
@@ -423,7 +427,7 @@ sub query {
     my @context   = @{ $self->{history}->messages() // [] };
     my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
 
-    my $resp = $self->{core}->complete(\@messages, { allow_fallbacks => $self->{_allow_fallbacks} });
+    my $resp = $self->{core}->complete_request(\@messages, { allow_fallbacks => $self->{_allow_fallbacks} });
 
     my $clean = $self->_apply_thought_filter($resp);
 
@@ -455,7 +459,7 @@ ZChat - Perl interface to LLM chat completions with session management
     
     # Simple usage
     my $z = ZChat->new();
-    my $response = $z->complete("Hello, how are you?");
+    my $response = $z->complete_request("Hello, how are you?");
     
     # With session and preset
     my $z = ZChat->new(

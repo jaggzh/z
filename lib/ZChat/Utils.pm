@@ -1,10 +1,15 @@
 package ZChat::Utils;
+use v5.26.3;
 use feature 'say';
 use experimental 'signatures';
+use strict;
+use warnings;
+
 use Exporter 'import';
 use File::Slurper qw(write_text read_text read_binary);
 use Encode qw(decode encode_utf8);
 use File::Path qw(make_path);
+use JSON::XS;
 use ZChat::ansi; # ANSI color vars: $red, $gre (green), $gra (gray); prefix b* for bright (e.g. $bgre), bg* for backgrounds (e.g. $bgred), and $rst to reset; 24-bit via a24fg(r,g,b)/a24bg(r,g,b)
 use Data::Dumper;
 
@@ -23,20 +28,18 @@ our @EXPORT_OK = qw(
 	split_pipestr
 	encode_pipestr_part
 	_decode_pipestring_part
-
 );
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
 );
 
-sub set_verbose { $verbose = defined $_[0] ? $_[0] : 0 }
-sub get_verbose { $verbose }
-
 our $json_compact = JSON::XS->new->ascii->canonical; # For our custom json formatting
 our $verbose = $ENV{ZCHAT_VERBOSE} // 0;  # 0=quiet, 1,2,3...
 
-sub set_verbosity($n){ $verbose = $n // 0 }
-sub get_verbosity(){ return $verbose }
+my $PIPE_DELIM_RE = qr/(?<!\\)(?:\\\\){,20}\K\|\|\|/;
+
+sub set_verbose($l) { $verbose = $l // 0 }
+sub get_verbose { $verbose }
 sub sel($lvl, @msg) { say STDERR @msg if $verbose >= $lvl }
 sub se(@msg) { say STDERR @msg; }
 sub pel($lvl, @msg) { print STDERR @msg if $verbose >= $lvl }
@@ -97,14 +100,15 @@ sub json_pretty_from_data_min($data) {
     return $result;
 }
 
-sub read_json_file($file) {
-    return {} unless -f $file;
-    open my $fh, '<', $file or die "Can't read $file: $!";
-    my $content = do { local $/; <$fh> };
-    close $fh;
-    return {} unless $content;
-    return decode_json($content);
-}
+# # This version is non-tolerant of utf8 encoding errors
+# sub read_json_file($file) {
+#     return {} unless -f $file;
+#     open my $fh, '<', $file or die "Can't read $file: $!";
+#     my $content = do { local $/; <$fh> };
+#     close $fh;
+#     return {} unless $content;
+#     return decode_json($content);
+# }
 
 sub read_json_file {
     my ($filepath) = @_;
@@ -222,7 +226,7 @@ sub write_file($filepath, $content, $optshr={}) {
 sub split_pipestr {
     my ($line) = @_;
     # 1) split at unescaped delimiters
-    my @parts = split /$DELIM_RE/, $line, -1;
+    my @parts = split /$PIPE_DELIM_RE/, $line, -1;
     # 2) unescape only pipes; leave other backslashes intact
     # say '';
     # say "Inputs: ", (join ', ', map { "{{$_}}" } @parts);

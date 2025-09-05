@@ -1,7 +1,11 @@
 ##### File: lib/ZChat/History.pm
 package ZChat::History;
-use v5.34;
+use v5.26.3;
+use feature 'say';
+use experimental 'signatures';
+use strict;
 use warnings;
+
 use utf8;
 
 use Scalar::Util qw(looks_like_number);

@@ -1,12 +1,17 @@
 package ZChat::Core;
-use v5.34;
+use v5.26.3;
+use feature 'say';
+use experimental 'signatures';
+use strict;
 use warnings;
+
 use utf8;
 use Mojo::UserAgent;
 use JSON::XS;
 use LWP::UserAgent;
 use HTTP::Request;
 use Encode qw(decode encode_utf8);
+
 use ZChat::Utils ':all';
 
 sub new {
@@ -23,12 +28,13 @@ sub new {
 }
 
 sub complete_request {
-    my ($self, $messages, %opts) = @_;
+    my ($self, $messages, $opts) = @_;
     
     sel(2, "Making completion request with " . @$messages . " messages");
     
     # Debug: show message summary
     if (get_verbose() >= 3) {
+    	sel 3, "=== Message history: ===";
         for my $i (0..$#$messages) {
             my $msg = $messages->[$i];
             my $content_len = length($msg->{content});
@@ -38,15 +44,15 @@ sub complete_request {
     }
     
     # Default options
-    my $temperature = $opts{temperature} || 0.7;
-    my $top_k = $opts{top_k} || 40;
-    my $top_p = $opts{top_p} || 0.9;
-    my $min_p = $opts{min_p} || 0.08;
-    my $n_predict = $opts{n_predict} || 8192;
-    my $stream = $opts{stream} // 1;
-    my $raw = $opts{raw} || 0;
-    my $show_thought = $opts{show_thought} || 0;
-    my $remove_pattern = $opts{remove_pattern};
+    my $temperature = $opts->{temperature} || 0.7;
+    my $top_k = $opts->{top_k} || 40;
+    my $top_p = $opts->{top_p} || 0.9;
+    my $min_p = $opts->{min_p} || 0.08;
+    my $n_predict = $opts->{n_predict} || 8192;
+    my $stream = $opts->{stream} // 1;
+    my $raw = $opts->{raw} || 0;
+    my $show_thought = $opts->{show_thought} || 0;
+    my $remove_pattern = $opts->{remove_pattern};
     
     # Get model info
     my $model_info = $self->get_model_info();
@@ -68,24 +74,24 @@ sub complete_request {
     };
     
     # Add grammar if specified
-    $data->{grammar} = $opts{grammar} if $opts{grammar};
-    $data->{n_probs} = int($opts{n_probs}) if $opts{n_probs};
+    $data->{grammar} = $opts->{grammar} if $opts->{grammar};
+    $data->{n_probs} = int($opts->{n_probs}) if $opts->{n_probs};
     
     sel(3, "API request data: " . dumps($data));
 
     if ($stream) {
-        return $self->_stream_completion($data, %opts);
+        return $self->_stream_completion($data, $opts);
     } else {
-        return $self->_sync_completion($data, %opts);
+        return $self->_sync_completion($data, $opts);
     }
 }
 
 sub _stream_completion {
-    my ($self, $data, %opts) = @_;
+    my ($self, $data, $opts) = @_;
     
-    my $raw = $opts{raw} || 0;
-    my $remove_pattern = $opts{remove_pattern};
-    my $show_thought = $opts{show_thought} || 0;
+    my $raw = $opts->{raw} || 0;
+    my $remove_pattern = $opts->{remove_pattern};
+    my $show_thought = $opts->{show_thought} || 0;
     my $live_output = !$raw && (!$remove_pattern || $show_thought);
     
     my $ua = Mojo::UserAgent->new(max_response_size => 0);
@@ -162,7 +168,7 @@ sub _stream_completion {
 }
 
 sub _sync_completion {
-    my ($self, $data, %opts) = @_;
+    my ($self, $data, $opts) = @_;
     
     my $ua = Mojo::UserAgent->new();
     my $tx = $ua->post(
@@ -179,8 +185,8 @@ sub _sync_completion {
     my $content = $response->{choices}[0]{message}{content} || '';
     
     # Post-process if needed
-    my $remove_pattern = $opts{remove_pattern};
-    my $show_thought = $opts{show_thought} || 0;
+    my $remove_pattern = $opts->{remove_pattern};
+    my $show_thought = $opts->{show_thought} || 0;
     
     if ($remove_pattern && !$show_thought) {
         $content =~ s/$remove_pattern//s;
@@ -227,9 +233,9 @@ sub get_n_ctx {
 }
 
 sub tokenize {
-    my ($self, $text, %opts) = @_;
+    my ($self, $text, $opts) = @_;
     
-    my $with_pieces = $opts{with_pieces} || 0;
+    my $with_pieces = $opts->{with_pieces} || 0;
     
     my $ua = LWP::UserAgent->new(timeout => 5);
     my $url = "$self->{api_base}/tokenize";

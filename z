@@ -88,7 +88,7 @@ my ($opt, $usage) = describe_options(
     [ 'store-user|su|S',    "Store session in user global config" ],
     [ 'store-session|ss',   "Store in current session config" ],
     [ 'thought|think',      "Do not remove reasoning sections" ],
-    [ 'thought-re|tre',       "Specify a regex for stripping reasoning" ],
+    [ 'thought-re|tre',     "Specify a regex for stripping reasoning" ],
     [],
     [ 'Session management:' ],
     [ 'session|n=s',        "Session name (slash-separated path)" ],
@@ -528,18 +528,6 @@ if (my $role_to_overwrite = $opt->owrite_last) {
     exit;
 }
 
-if ($opt->edit_hist) {
-    die "Input-only mode - editing makes no sense\n" if $opt->input_only;
-    die "No-history mode - editing makes no sense\n" if $opt->no_history;
-    
-    my $session_name = $zchat->get_session_name();
-    my $session_dir = $zchat->{storage}->get_session_dir($session_name);
-    my $history_file = File::Spec->catfile($session_dir, 'history.json');
-    
-    system($editor, '--', $history_file);
-    exit;
-}
-
 # Output last message content (to stdout or a file)
 if (defined $opt->output_last) {
     die "ERROR: Request for --output-last while also providing a query. We don't know how to resolve the mixed output. Aborting."
@@ -559,6 +547,18 @@ if (defined $opt->output_last) {
             or die "Error writing last message to '$path'\n";
         sel 1, "Wrote last message to $path";
     }
+    exit;
+}
+
+if ($opt->edit_hist) {
+    die "Input-only mode - editing makes no sense\n" if $opt->input_only;
+    die "No-history mode - editing makes no sense\n" if $opt->no_history;
+    
+    my $session_name = $zchat->get_session_name();
+    my $session_dir = $zchat->{storage}->get_session_dir($session_name);
+    my $history_file = File::Spec->catfile($session_dir, 'history.json');
+    
+    system($editor, '--', $history_file);
     exit;
 }
 
@@ -613,19 +613,28 @@ while (1) {
         
         # Add probability tracking if requested
         $complete_opts{n_probs} = $opt->probs if defined $opt->probs;
-        
 
         if ($opt->thought && ($opt->thought_re//0)) {
             die "Cannot specify both --thought and --thought-re.\n";
         }
-        if (!$opt->thought) {
-            if ($opt->thought_re//0) {
-                $complete_opts{remove_pattern} = $opt->thought_re;
+        if ($opt->thought) { # User ENABLED reasoning display (ie. disabled removal)
+            my $thought_re;
+            if ($opt->thought_re//0) { # User option precedence
+                $thought_re = $opt->thought_re;
             } else {
-                $complete_opts{remove_pattern} = qr/(?:<think>)?.*?<\/think>\s*/s;
+                # System prompt specifies
+                $thought_re = ($prompt =~ /^==== *z *think *(.+)$/m);
+                if (!defined $thought_re && $prompt =~ /^==== z think$/m) {
+                    # sys prompt says use OG think tag pattern
+                    $thought_re = qr/(?:<think>)?.*?<\/think>\s*/s; # Default for everything
+                }
+                if (!defined $thought_re && $def_thought_re) {
+                    $thought_re = $def_thought_re; # If we always try to strip
+                }
             }
+            $complete_opts{remove_pattern} = $thought_re if ($thought_re // 0);
         }
-        
+
         # Add images to user input if present
         if (@image_data) {
             # For now, just mention images in prompt

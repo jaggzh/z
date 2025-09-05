@@ -270,7 +270,7 @@ my $zchat = ZChat->new(
     verbose => $verbose,
 );
 
-$zchat->print_set(1); # Module default is silent.
+$zchat->set_print(1); # Module default is silent.
 
 # System prompt setters from CLI (provenance=CLI)
 if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, scope=>'CLI') }
@@ -280,12 +280,16 @@ if (defined $opt->system)         { $zchat->system->set_auto($opt->system, scope
 
 # Thought removal policy from CLI
 if ($opt->thought && ($opt->thought_re//0)) {
-    die "Cannot specify both --thought and --thought-re.\n";
+    die "Conflict trying to both enable thoughts (--thought) and providing a removal regex (--thought-re).\n";
 }
 if ($opt->thought) {
-    $zchat->thought_set({ enabled => 0 });
+    sel 1, "Thought-display ENABLED.";
+    $zchat->set_thought({ enabled => 0 });
 } else {
-    if ($opt->thought_re) { $zchat->thought_set({ enabled => 1, pattern => qr/$opt->thought_re/ }) }
+    sel 1, "Thought-removal forced with provided pattern.";
+    if ($opt->thought_re) {
+        $zchat->set_thought({ pattern => qr/$$opt{thought_re}/ });
+    }
 }
 
 # History mode mapping

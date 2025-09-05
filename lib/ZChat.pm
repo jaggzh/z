@@ -18,6 +18,8 @@ use ZChat::SystemPrompt;
 
 our $VERSION = '1.1.0';
 
+my $def_thought_re = qr{(?:<think>)?.*?<\/think>\s*};
+
 sub new {
     my ($class, %opts) = @_;
     
@@ -369,10 +371,22 @@ sub history { $_[0]{history} }
 
 sub system  { $_[0]{system_prompt} }
 
-sub thought_set {
+sub set_thought {
     my ($self, $opts) = @_;
-    $self->{_thought}{enabled} = $opts->{enabled} if exists $opts->{enabled};
-    $self->{_thought}{pattern} = $opts->{pattern} if exists $opts->{pattern};
+	if (($opts->{pattern}//'') eq /^\s*$/) {
+		sel 0, "Empty/undef/whitespace thought pattern provided. Thought removal has been disabled and streaming may be active.";
+		$self->{_thought}{enabled} = 0;
+		$self->{_thought}{pattern} = undef;
+	} else {
+		if ($opts->{pattern} // 0) { # Pattern provided
+			$self->{_thought}{pattern} = $opts->{pattern};
+			$self->{_thought}{enabled} = 1;
+		} elsif (exists $self->{_thought}{enabled}) {
+			sel 1, "Default thought pattern enabled ($def_thought_re)";
+			$self->{_thought}{pattern} = $def_thought_re;
+			$self->{_thought}{enabled} = 1;
+		}
+	}
     return $self;
 }
 
@@ -382,15 +396,10 @@ sub set_allow_fallbacks {
     return $self;
 }
 
-sub print_set {
-    my ($self, $target) = @_;
-    if ($target && $target eq 1) {
-        $self->{_print_target} = *STDOUT;
-    } elsif ($target) {
-        $self->{_print_target} = $target;   # expect GLOB/IO handle
-    } else {
-        $self->{_print_target} = undef;     # silent
-    }
+sub set_print($self, $target) {
+	my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
+	my $print_fh = _validate_print_opt($target);
+    $self->{_print_target} = $target;   # GLOB/IO handle
     return $self;
 }
 
@@ -433,8 +442,37 @@ sub _apply_thought_filter {
     return $text;
 }
 
-sub query {
-    my ($self, $user_text) = @_;
+sub _validate_print_opt($target) {
+	# Target: 0(silent), 1(*STDOUT), or an open GLOB/IO handle
+	my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
+	my $print_fh;
+    die "Undefined target passed to set_print(). $accept_msg" if !defined $target;
+    if ($target eq 1) {
+        $print_fh = *STDOUT;
+    } elsif ($target eq 0) {
+        $print_fh = undef; # Silent
+    } elsif (!openhandle $target) {
+    	die "Unexpected value passed as target of set_print() '$target'. $accept_msg";
+	} else { $print_fh = $target;   # GLOB/IO handle
+    }
+    return $print_fh;
+}
+
+sub query($self, $user_text, $opts={}) {
+    my $print_fh;
+    if (exists $opts->{print}) {
+		$print_fh = _validate_fh($opts->{print});
+	}
+    my $on_chunk = exists $opts->{on_chunk} ? $opts->{on_chunk} : $self->{_on_chunk};
+    my $stream   = $opts->{stream} ? 1 : 0;
+
+    if ($stream && $self->{_thought}{enabled} && defined $self->{_thought}{pattern}) {
+        # Too common to revert to non-streaming. We won't notify.
+        if ($self->{_fallbacks_ok}) {
+            # warn "$msg\n";
+            $stream = 0;
+        }
+    }
 
     $self->{history}->load();
 
@@ -447,9 +485,26 @@ sub query {
     my @context   = @{ $self->{history}->messages() // [] };
     my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
 
-    my $resp = $self->{core}->complete_request(\@messages, { allow_fallbacks => $self->{_allow_fallbacks} });
+    my $accum = '';
+    if ($stream) {
+        my $cb = sub ($piece) {
+            $accum .= $piece;
+            if ($on_chunk) {
+                $on_chunk->($piece);
+            } elsif ($print_fh) {
+                print $print_fh $piece;
+            }
+        };
+        $self->{core}->complete_request(\@messages, { on_chunk => $cb, fallbacks_ok => $self->{_fallbacks_ok} });
+    } else {
+        my $full = $self->{core}->complete_request(\@messages, { fallbacks_ok => $self->{_fallbacks_ok} });
+        $accum = $full;
+        if ($print_fh && !$on_chunk) {
+            print $print_fh $accum;
+        }
+    }
 
-    my $clean = $self->_apply_thought_filter($resp);
+    my $clean = $self->_apply_thought_filter($accum);
 
     $self->{history}->append('user', $user_text);
     $self->{history}->append('assistant', $clean);

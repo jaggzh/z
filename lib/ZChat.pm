@@ -33,7 +33,9 @@ sub new {
         pin_mgr      => undef,
         history      => undef,
         _thought     => { enabled => 1, pattern => qr/(?:<think>)?.*?<\/think>\s*/s },
-        _allow_fallbacks => 0,
+        _fallbacks_ok => 0,
+        _print_target    => undef,   # undef (silent) | *FH
+        _on_chunk        => undef,   # optional streaming callback
     };
     
     bless $self, $class;
@@ -110,25 +112,25 @@ sub _load_config {
     );
 }
 
-sub complete {
-    my ($self, $user_input, %opts) = @_;
+# # High level is handled through ->query(). Remove this
+# sub complete {
+#     my ($self, $user_input, $opts={}) = @_;
     
-    # Build complete message array with pins
-    my $messages = $self->_build_messages($user_input, %opts);
+#     # Build complete message array with pins
+#     my $messages = $self->_build_messages($user_input, $opts);
     
-    # Get model info for context management
-    my $model_info = $self->{core}->get_model_info();
-    my $max_tokens = $model_info->{n_ctx} // 8192;
+#     # Get model info for context management
+#     my $model_info = $self->{core}->get_model_info();
+#     my $max_tokens = $model_info->{n_ctx} // 8192;
     
-    # Truncate history if needed
-    $messages = $self->_manage_context($messages, $max_tokens);
+#     # Truncate history if needed
+#     $messages = $self->_manage_context($messages, $max_tokens);
     
-    # Make completion request
-    return $self->{core}->complete_request($messages, %opts);
-}
+#     # Make completion request
+#     return $self->{core}->complete_request($messages, $opts);
+# }
 
-sub _build_messages {
-    my ($self, $user_input, $opts) = @_;
+sub _build_messages($self, $user_input, $opts={}) {
     
     my @messages;
     
@@ -376,7 +378,25 @@ sub thought_set {
 
 sub set_allow_fallbacks {
     my ($self, $v) = @_;
-    $self->{_allow_fallbacks} = $v ? 1 : 0;
+    $self->{_fallbacks_ok} = $v ? 1 : 0;
+    return $self;
+}
+
+sub print_set {
+    my ($self, $target) = @_;
+    if ($target && $target eq 1) {
+        $self->{_print_target} = *STDOUT;
+    } elsif ($target) {
+        $self->{_print_target} = $target;   # expect GLOB/IO handle
+    } else {
+        $self->{_print_target} = undef;     # silent
+    }
+    return $self;
+}
+
+sub on_chunk_set {
+    my ($self, $cb) = @_;
+    $self->{_on_chunk} = $cb;
     return $self;
 }
 

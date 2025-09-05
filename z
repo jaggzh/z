@@ -270,6 +270,8 @@ my $zchat = ZChat->new(
     verbose => $verbose,
 );
 
+$zchat->print_set(1); # Module default is silent.
+
 # System prompt setters from CLI (provenance=CLI)
 if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, scope=>'CLI') }
 if (defined $opt->system_str)     { $zchat->system->set_str($opt->system_str, scope=>'CLI') }
@@ -624,7 +626,7 @@ if (defined $opt->output_last && length($opt->output_last)) {
 
 if (defined $uprompt && length $uprompt) {
     tts_str($uprompt) if $opt->play_user;
-    my $response = $zchat->query($uprompt);
+    my $response = $zchat->query($uprompt, { stream=>1 } );
     if ($opt->play_resp) {
         eval { play_tts($response) };   # or whatever your fn is called
         warn "Audio error: $@" if $@;
@@ -633,7 +635,7 @@ if (defined $uprompt && length $uprompt) {
 
 exit if !$intmode;
 
-# my $response = $zchat->query($uprompt) if defined $uprompt;
+# my $response = $zchat->query($uprompt, { stream=>1 } ) if defined $uprompt;
 my $term;
 $term = Term::ReadLine->new("z") or die "Cannot create Term::ReadLine object";
 my $readline_histfile = "/tmp/zchat_readline-$user.json";
@@ -667,7 +669,7 @@ while (1) {
     
     # Make completion request
     print $clr_sys;
-    my $response = $zchat->query($line);
+    my $response = $zchat->query($line, { stream=>1 } );
     say $rst if $intmode;
     tts_str($response) if $opt->play_resp; # TTSresponse
 }

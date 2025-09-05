@@ -92,7 +92,7 @@ sub _stream_completion {
     my $raw = $opts->{raw} || 0;
     my $remove_pattern = $opts->{remove_pattern};
     my $show_thought = $opts->{show_thought} || 0;
-    my $live_output = !$raw && (!$remove_pattern || $show_thought);
+    my $live_output = $raw || (!$remove_pattern || $show_thought);
     
     my $ua = Mojo::UserAgent->new(max_response_size => 0);
     my $tx = $ua->build_tx(

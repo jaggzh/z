@@ -110,7 +110,6 @@ sub get_session_name {
 
 sub _get_system_defaults {
     return {
-        preset => 'default',
         session => '',
         pin_defaults => {
             role => 'system',

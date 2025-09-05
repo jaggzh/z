@@ -436,9 +436,9 @@ sub list_system_prompts {
 
 sub _apply_thought_filter {
     my ($self, $text) = @_;
-    return $text unless $self->{_thought}{enabled};
-    my $re = $self->{_thought}{pattern} // qr/(?:<think>)?.*?<\/think>\s*/s;
-    $text =~ s/$re//g;
+    return $text if $self->{_thought}{enabled}; # Return untouched
+    return $text if $self->{_thought}{pattern} // 0; # No default stripping.
+    $text =~ s/$$self{_thought}{pattern}//;
     return $text;
 }
 

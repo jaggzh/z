@@ -286,8 +286,8 @@ if ($opt->thought) {
     sel 1, "Thought-display ENABLED.";
     $zchat->set_thought({ enabled => 0 });
 } else {
-    sel 1, "Thought-removal forced with provided pattern.";
     if ($opt->thought_re) {
+        sel 1, "Thought-removal forced with provided pattern.";
         $zchat->set_thought({ pattern => qr/$$opt{thought_re}/ });
     }
 }

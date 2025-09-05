@@ -9,29 +9,33 @@ use ZChat::Config;
 use ZChat::Storage;
 use ZChat::Pin;
 use ZChat::Utils ':all';
+use ZChat::History;
+use ZChat::SystemPrompt;
 
-our $VERSION = '1.0.0';
+our $VERSION = '1.1.0';
 
 sub new {
     my ($class, %opts) = @_;
     
     my $self = {
         session_name => ($opts{session} // ''),
-        system => $opts{system},
-        system_prompt => $opts{system_prompt},
-        system_file => $opts{system_file},
-        pin_shims => $opts{pin_shims},
-        config => undef,
-        core => undef,
-        storage => undef,
-        pin_mgr => undef,
+        system       => $opts{system},
+        system_prompt=> $opts{system_prompt},
+        system_file  => $opts{system_file},
+        pin_shims    => $opts{pin_shims},
+        config       => undef,
+        core         => undef,
+        storage      => undef,
+        pin_mgr      => undef,
+        history      => undef,
+        _thought     => { enabled => 1, pattern => qr/(?:<think>)?.*?<\/think>\s*/s },
+        _allow_fallbacks => 0,
     };
     
     bless $self, $class;
     
-    # Initialize components
     $self->{storage} = ZChat::Storage->new();
-    $self->{config} = ZChat::Config->new(
+    $self->{config}  = ZChat::Config->new(
         storage => $self->{storage},
         session_name => $self->{session_name}
     );
@@ -43,6 +47,16 @@ sub new {
     $self->{pin_mgr} = ZChat::Pin->new(
         storage => $self->{storage},
         session_name => $self->{session_name}
+    );
+
+    $self->{history} = ZChat::History->new(
+        storage => $self->{storage},
+        session => $self->{session_name},
+        mode    => 'rw',
+    );
+
+    $self->{system_prompt} = ZChat::SystemPrompt->new(
+        config => $self->{config}
     );
 
     $self->{core} = ZChat::Core->new();
@@ -343,6 +357,88 @@ sub store_user_config {
 sub store_session_config {
     my ($self, %opts) = @_;
     return $self->{config}->store_session_config(%opts);
+}
+
+sub history { $_[0]{history} }
+
+sub system  { $_[0]{system_prompt} }
+
+sub thought_set {
+    my ($self, $opts) = @_;
+    $self->{_thought}{enabled} = $opts->{enabled} if exists $opts->{enabled};
+    $self->{_thought}{pattern} = $opts->{pattern} if exists $opts->{pattern};
+    return $self;
+}
+
+sub set_allow_fallbacks {
+    my ($self, $v) = @_;
+    $self->{_allow_fallbacks} = $v ? 1 : 0;
+    return $self;
+}
+
+sub pins_add   { $_[0]{pin_mgr}->add_pin($_[1], %{ $_[2] || {} }) }
+sub pins_list  { $_[0]{pin_mgr}->list_pins() }
+sub pins_wipe  { $_[0]{pin_mgr}->clear_pins() }
+
+sub list_system_prompts {
+    my ($self) = @_;
+    my @files;
+    my $sys_dir;
+    if (exists $ENV{ZCHAT_DATADIR}) {
+        my $maybe = File::Spec->catdir($ENV{ZCHAT_DATADIR}, 'sys');
+        $sys_dir = $maybe if -d $maybe;
+    }
+    if ($sys_dir) {
+        opendir(my $dh, $sys_dir);
+        @files = sort grep { $_ !~ /^\./ && -f File::Spec->catfile($sys_dir, $_) } readdir($dh);
+        closedir $dh;
+    }
+    my @personas;
+    my $plist = `persona --list 2>/dev/null`;
+    if ($? == 0 && defined $plist) {
+        @personas = grep { length } map { chomp; $_ } split(/\n/, $plist);
+    }
+    return { files => \@files, personas => \@personas, dir => $sys_dir };
+}
+
+sub _apply_thought_filter {
+    my ($self, $text) = @_;
+    return $text unless $self->{_thought}{enabled};
+    my $re = $self->{_thought}{pattern} // qr/(?:<think>)?.*?<\/think>\s*/s;
+    $text =~ s/$re//g;
+    return $text;
+}
+
+sub query {
+    my ($self, $user_text) = @_;
+
+    $self->{history}->load();
+
+    my $resolved = $self->{system_prompt}->resolve();
+    if ($resolved && $resolved->{source} eq 'str') {
+        # no file IO needed; ok
+    }
+
+    my $pins_msgs = $self->{pin_mgr}->build_message_array();
+    my @context   = @{ $self->{history}->messages() // [] };
+    my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
+
+    my $resp = $self->{core}->complete(\@messages, { allow_fallbacks => $self->{_allow_fallbacks} });
+
+    my $clean = $self->_apply_thought_filter($resp);
+
+    $self->{history}->append('user', $user_text);
+    $self->{history}->append('assistant', $clean);
+    $self->{history}->save();
+
+    return $clean;
+}
+
+sub history_owrite_last {
+    my ($self, @args) = @_;
+    $self->{history}->owrite_last(@args);
+    $self->{history}->save();
+    return $self;
 }
 
 1;

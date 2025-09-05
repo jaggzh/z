@@ -88,7 +88,7 @@ my ($opt, $usage) = describe_options(
     [ 'store-user|su|S',    "Store session in user global config" ],
     [ 'store-session|ss',   "Store in current session config" ],
     [ 'thought|think',      "Do not remove reasoning sections" ],
-    [ 'thought-re|tre',     "Specify a regex for stripping reasoning" ],
+    [ 'thought-re|tre=s',   "Specify a regex for stripping reasoning" ],
     [],
     [ 'Session management:' ],
     [ 'session|n=s',        "Session name (slash-separated path)" ],
@@ -249,41 +249,54 @@ if ($opt->image) {
     $use_images = 1;
 }
 
+# Apply configuration/storage changes early (before any blocking/editor work)
+if ($opt->store_user || $opt->store_session) {
+    my %store_opts;
+    $store_opts{session} = $opt->session if defined $opt->session;
+    $store_opts{system_str}  = $opt->system_str if defined $opt->system_str;
+    $store_opts{system_file} = $opt->system_file if defined $opt->system_file;
+    $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
+    if ($opt->store_user)   { ZChat->new()->store_user_config(%store_opts) }
+    if ($opt->store_session){ ZChat->new(session => ($opt->session // ''))->store_session_config(%store_opts) }
+}
+
 # Initialize ZChat
 my $zchat = ZChat->new(
     session => $opt->session // '',
-    system       => $opt->system,
-    system_file  => $opt->system_file,
-    system_str   => $opt->system_str,
-    system_persona => $opt->system_persona,
     verbose => $verbose,
-    pin_shims => (defined $opt->pin_shim ? { user=>$opt->pin_shim, assistant=>$opt->pin_shim } : undef),
-    pin_sys_mode => ($opt->pin_sys_mode // undef),
 );
 
-# Handle utility commands first
+# System prompt setters from CLI (provenance=CLI)
+if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, scope=>'CLI') }
+if (defined $opt->system_str)     { $zchat->system->set_str($opt->system_str, scope=>'CLI') }
+if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, scope=>'CLI') }
+if (defined $opt->system)         { $zchat->system->set_auto($opt->system, scope=>'CLI') }
+
+# Thought removal policy from CLI
+if ($opt->thought && ($opt->thought_re//0)) {
+    die "Cannot specify both --thought and --thought-re.\n";
+}
+if ($opt->thought) {
+    $zchat->thought_set({ enabled => 0 });
+} else {
+    if ($opt->thought_re) { $zchat->thought_set({ enabled => 1, pattern => qr/$opt->thought_re/ }) }
+}
+
+# History mode mapping
+if ($opt->no_history) { $zchat->history->set_mode('none') }
+elsif ($opt->input_only) { $zchat->history->set_mode('ro') }
+else { $zchat->history->set_mode('rw') }
+
+# Wipe (persistent)
+if ($opt->wipe) { $zchat->history->wipe() }
+
+# Utility: list system prompts
 if ($opt->list_sys) {
-    # Files under $ZCHAT_DATADIR/sys (if present) and personas from `persona --list`
-    my @files;
-    my $sys_dir;
-    if (exists $ENV{ZCHAT_DATADIR}) {
-        my $maybe = File::Spec->catdir($ENV{ZCHAT_DATADIR}, 'sys');
-        $sys_dir = $maybe if -d $maybe;
-    }
-    if ($sys_dir) {
-        opendir(my $dh, $sys_dir);
-        @files = sort grep { $_ !~ /^\./ && -f File::Spec->catfile($sys_dir, $_) } readdir($dh);
-        closedir $dh;
-    }
-    say "System files" . ($sys_dir ? " ($sys_dir)" : "") . ":";
-    say(@files ? map { "  $_" } @files : "  (none found)");
-    my @personas;
-    my $plist = `persona --list 2>/dev/null`;
-    if ($? == 0 && defined $plist) {
-        @personas = grep { length } map { chomp; $_ } split(/\n/, $plist);
-    }
+    my $ls = $zchat->list_system_prompts();
+    say "System files" . ($ls->{dir} ? " ($ls->{dir})" : "") . ":";
+    if (@{$ls->{files}}) { say map { "  $_" } @{$ls->{files}} } else { say "  (none found)" }
     say "Personas:";
-    say(@personas ? map { "  $_" } @personas : "  (none found or persona tool unavailable)");
+    if (@{$ls->{personas}}) { say map { "  $_" } @{$ls->{personas}} } else { say "  (none found or persona tool unavailable)" }
     exit;
 }
 
@@ -577,112 +590,87 @@ if (!$intmode || $opt->no_color) {
 # Show session info
 sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . $zchat->get_session_name() . "$rst";
 
-# Terminal setup for interactive mode
+# Overwrite-last (if requested to use current prompt)
+if (defined $opt->owrite_last && length($opt->owrite_last)) {
+    my $role = ($opt->owrite_last =~ /^(u|user)$/i) ? 'user'
+             : ($opt->owrite_last =~ /^(a|assistant)$/i) ? 'assistant'
+             : die "owrite-last expects u|user|a|assistant";
+    die "Invalid to both call --owrite-last and provide a query.\n"
+        if defined $uquery;
+    sel 1, "Overwriting last message from role '$role'";
+    $zchat->history_owrite_last($uprompt, { role => $role });
+    exit;
+}
+
+# Output last message content helper
+if (defined $opt->output_last && length($opt->output_last)) {
+    my $last = $zchat->history->get_last(role => 'assistant');
+    my $text = $last ? ($last->{content} // '') : '';
+    die "Currently we consider it invalid to both --output-last AND provide a query.\n"
+		if defined $uquery;
+    if ($opt->output_last eq '-') {
+        print $text;
+    } else {
+        my $path = $opt->output_last;
+        $path =~ s/^-//;
+        write_text($path, $text);
+    }
+    exit;
+}
+
+if (defined $uprompt && length $uprompt) {
+    tts_str($uprompt) if $opt->play_user;
+    my $response = $zchat->query($uprompt);
+    say $response;
+    # optional: audio playback of the response (your existing playback function)
+    if ($opt->speak || $opt->audio) {
+        eval { play_tts($response) };   # or whatever your fn is called
+        warn "Audio error: $@" if $@;
+    }
+}
+
+exit if !$intmode;
+
+# my $response = $zchat->query($uprompt) if defined $uprompt;
 my $term;
-if ($intmode) {
-    $term = Term::ReadLine->new("z") or die "Cannot create Term::ReadLine object";
-    
-    my $readline_histfile = "/tmp/zchat_readline-$user.json";
-    $term->ReadHistory($readline_histfile) if -e $readline_histfile;
-    
-    # Set up terminal reset on enter
-    $term->add_defun("accept-line", sub {
-        my ($count, $key) = @_;
-        print "$rst";
-        $term->call_function("accept-line", $count, $key);
-    }, ord("\n"));
-}
+$term = Term::ReadLine->new("z") or die "Cannot create Term::ReadLine object";
+my $readline_histfile = "/tmp/zchat_readline-$user.json";
+$term->ReadHistory($readline_histfile) if -e $readline_histfile;
+# Set up terminal reset on enter
+$term->add_defun("accept-line", sub {
+    my ($count, $key) = @_;
+    print "$rst";
+    $term->call_function("accept-line", $count, $key);
+}, ord("\n"));
 
-# Main completion loop
 while (1) {
-    # Process current query if we have one
-    if (defined $uprompt && $uprompt ne '') {
-        # TTS for user input
-        tts_str($uprompt) if $opt->play_user;
-        
-        print $clr_sys if $intmode;
-        
-        # Prepare completion options
-        my %complete_opts = (
-            stream => !$opt->raw,
-            raw => $opt->raw,
-            show_thought => $opt->thought,
-            n_predict => $opt->n_predict,
-            grammar => $opt->grammar,
-        );
-        
-        # Add probability tracking if requested
-        $complete_opts{n_probs} = $opt->probs if defined $opt->probs;
+    my $line = $term->readline($intmode_prompt);
+    print "$rst";
+    last if !defined($line);
+    next if $line eq '';
 
-        if ($opt->thought && ($opt->thought_re//0)) {
-            die "Cannot specify both --thought and --thought-re.\n";
-        }
-        if ($opt->thought) { # User ENABLED reasoning display (ie. disabled removal)
-            my $thought_re;
-            if ($opt->thought_re//0) { # User option precedence
-                $thought_re = $opt->thought_re;
-            } else {
-                # System prompt specifies
-                $thought_re = ($prompt =~ /^==== *z *think *(.+)$/m);
-                if (!defined $thought_re && $prompt =~ /^==== z think$/m) {
-                    # sys prompt says use OG think tag pattern
-                    $thought_re = qr/(?:<think>)?.*?<\/think>\s*/s; # Default for everything
-                }
-                if (!defined $thought_re && $def_thought_re) {
-                    $thought_re = $def_thought_re; # If we always try to strip
-                }
-            }
-            $complete_opts{remove_pattern} = $thought_re if ($thought_re // 0);
-        }
-
-        # Add images to user input if present
-        if (@image_data) {
-            # For now, just mention images in prompt
-            my @img_mentions;
-            for my $img (@image_data) {
-                push @img_mentions, "[$img->{id}]";
-            }
-            $uprompt .= "\n\nImages attached: " . join(", ", @img_mentions);
-        }
-        
-        # Make completion request
-        my $response = $zchat->complete($uprompt, %complete_opts);
-        
-        say $rst if $intmode;
-        
-        # TTS for response
-        tts_str($response) if $opt->play_resp;
-        
-        # Save to history (unless disabled)
-        unless ($opt->no_history || $opt->input_only) {
-            $zchat->{storage}->append_to_history($zchat->get_session_name(), $uprompt, $response);
-        }
-    }
-    
-    # Interactive mode: get next input
-    if ($intmode) {
-        my $line = $term->readline($intmode_prompt);
-        print "$rst";
-        
-        # Quit conditions
-        last if !defined($line) || $line =~ /^(q|quit)$/i;
-        
-        $term->addhistory($line) if $line ne '';
-        my $readline_histfile = "/tmp/zchat_readline-$user.json";
-        $term->write_history($readline_histfile);
-        
-        $uprompt = $line;
-    }
-    
-    last unless $intmode;
-}
-
-# Save readline history
-if ($intmode) {
-    my $readline_histfile = "/tmp/zchat_readline-$user.json";
     $term->write_history($readline_histfile);
+
+    tts_str($line) if $opt->play_user; # TTS user input
+        
+    # # Add images to user input if present
+    # if (@image_data) {
+    #     # For now, just mention images in prompt
+    #     my @img_mentions;
+    #     for my $img (@image_data) {
+    #         push @img_mentions, "[$img->{id}]";
+    #     }
+    #     $uprompt .= "\n\nImages attached: " . join(", ", @img_mentions);
+    # }
+    
+    # Make completion request
+    print $clr_sys;
+    my $response = $zchat->query($line);
+    say $rst if $intmode;
+    tts_str($response) if $opt->play_resp; # TTSresponse
 }
 
+$term->write_history($readline_histfile);
 exit;
 
 # Utility functions

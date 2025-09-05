@@ -3,6 +3,7 @@ use v5.34;
 use warnings;
 use utf8;
 use File::Spec;
+use Cwd qw(abs_path);
 use File::Path qw(make_path);
 use ZChat::Utils ':all';
 
@@ -248,6 +249,76 @@ sub get_pin_shims {
 sub get_pin_sys_mode {
     my ($self) = @_;
     return $self->{effective_config}->{pin_sys_mode} || 'vars';
+}
+
+sub set_system_candidate {
+    my ($self, $scope, %kv) = @_;
+    die "set_system_candidate: scope required" unless defined $scope;
+    my ($k, $v) = each %kv;
+    die "set_system_candidate: exactly one key" unless defined $k && @_ == 4;
+    $self->{_sp_candidates} //= {};
+    $self->{_sp_candidates}{$scope} //= {};
+    $self->{_sp_candidates}{$scope}{$k} = $v;
+    return $self;
+}
+
+sub resolve_system_prompt {
+    my ($self) = @_;
+
+    my $check_file = sub ($p) {
+        return 0 unless defined $p && length $p;
+        return -f $p ? 1 : 0;
+    };
+    my $norm_file = sub ($p) {
+        return abs_path($p) // $p;
+    };
+    my $check_persona = sub ($name) {
+        return 0 unless defined $name && length $name;
+        system("persona --help >/dev/null 2>&1");
+        return ($? == 0) ? 1 : 0;
+    };
+
+    my @scopes = qw(CLI SESSION USER CODE);
+    my %cand   = %{ $self->{_sp_candidates} // {} };
+
+    my $pick_in_scope = sub ($scope) {
+        my $h = $cand{$scope} // {};
+        if (defined $h->{system_file}) {
+            my $ok = $check_file->($h->{system_file});
+            die "system_file not found: $h->{system_file}" unless $ok;
+            return { source=>'file', value=>$norm_file->($h->{system_file}), provenance=>$scope };
+        }
+        if (defined $h->{system_str}) {
+            return { source=>'str', value=>$h->{system_str}, provenance=>$scope };
+        }
+        if (defined $h->{system_persona}) {
+            die "persona tool unavailable" unless $check_persona->($h->{system_persona});
+            return { source=>'persona', value=>$h->{system_persona}, provenance=>$scope };
+        }
+        if (defined $h->{system}) {
+            my $name = $h->{system};
+            if ($check_file->($name)) {
+                return { source=>'file', value=>$norm_file->($name), provenance=>$scope };
+            }
+            die "persona tool unavailable" unless $check_persona->($name);
+            return { source=>'persona', value=>$name, provenance=>$scope };
+        }
+        if (defined $h->{file_or_persona}) {
+            my $name = $h->{file_or_persona};
+            if ($check_file->($name)) {
+                return { source=>'file', value=>$norm_file->($name), provenance=>$scope };
+            }
+            die "persona tool unavailable" unless $check_persona->($name);
+            return { source=>'persona', value=>$name, provenance=>$scope };
+        }
+        return undef;
+    };
+
+    for my $S (@scopes) {
+        my $r = $pick_in_scope->($S);
+        return $r if $r;
+    }
+    return undef;
 }
 
 1;

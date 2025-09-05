@@ -49,28 +49,24 @@ sub load_effective_config {
             sel(2, "Loaded session config overrides");
         }
     }
-    
+
     # Record source-specific copies for precedence resolution
-    $config->{system_file_user}    = $user_config->{system_file}       if $user_config && defined $user_config->{system_file};
-    $config->{system_prompt_user}  = $user_config->{system_prompt}     if $user_config && defined $user_config->{system_prompt};
+    $config->{system_file_user}       = $user_config->{system_file}       if $user_config && defined $user_config->{system_file};
+    $config->{system_prompt_user}     = $user_config->{system_prompt}     if $user_config && defined $user_config->{system_prompt};
+    $config->{system_persona_user}    = $user_config->{system_persona}    if $user_config && defined $user_config->{system_persona};
     if ($effective_session) {
         my $session_config = $self->_load_session_config() || {};
-        $config->{system_file_session}   = $session_config->{system_file}   if defined $session_config->{system_file};
-        $config->{system_prompt_session} = $session_config->{system_prompt} if defined $session_config->{system_prompt};
+        $config->{system_file_session}    = $session_config->{system_file}    if defined $session_config->{system_file};
+        $config->{system_prompt_session}  = $session_config->{system_prompt}  if defined $session_config->{system_prompt};
+        $config->{system_persona_session} = $session_config->{system_persona} if defined $session_config->{system_persona};
     }
-    
-    # 4. CLI overrides (runtime only) — keep originals *and* stash source-marked copies
-    for my $key (qw(system_prompt system_file)) {
-        if (defined $cli_opts{$key}) {
-            $config->{$key} = $cli_opts{$key};
-            sel(2, "Setting $key '$cli_opts{$key}' from CLI options");
-        }
-    }
-    $config->{_cli_system_prompt} = $cli_opts{system_prompt} if defined $cli_opts{system_prompt};
-    $config->{_cli_system_file}   = $cli_opts{system_file}   if defined $cli_opts{system_file};
-    $config->{preset} = $cli_opts{preset} if defined $cli_opts{preset};
 
-    # Preserve pin_shims / pin_sys_mode CLI handling (was lost)
+    # 4. CLI overrides (runtime only) — stash source-marked copies
+    if (defined $cli_opts{system_str})  { $config->{system_prompt} = $cli_opts{system_str};  $config->{_cli_system_str}  = $cli_opts{system_str};  sel(2, "Setting system_str from CLI options"); }
+    if (defined $cli_opts{system_file}) { $config->{system_file}   = $cli_opts{system_file}; $config->{_cli_system_file} = $cli_opts{system_file}; sel(2, "Setting system_file from CLI options"); }
+    if (defined $cli_opts{system_persona}) { $config->{system_persona} = $cli_opts{system_persona}; $config->{_cli_system_persona} = $cli_opts{system_persona}; sel(2, "Setting system_persona from CLI options"); }
+
+    # Preserve pin_shims / pin_sys_mode CLI handling
     if (defined $cli_opts{pin_shims}) {
         $config->{pin_shims} = $cli_opts{pin_shims};
         sel(2, "Setting pin_shims from CLI options");
@@ -79,8 +75,8 @@ sub load_effective_config {
         $config->{pin_sys_mode} = $cli_opts{pin_sys_mode};
         sel(2, "Setting pin_sys_mode '$cli_opts{pin_sys_mode}' from CLI options");
     }
-    $config->{_cli_pin_shims}   = $cli_opts{pin_shims}   if defined $cli_opts{pin_shims};
-    $config->{_cli_pin_sys_mode}= $cli_opts{pin_sys_mode}if defined $cli_opts{pin_sys_mode};
+    $config->{_cli_pin_shims}    = $cli_opts{pin_shims}    if defined $cli_opts{pin_shims};
+    $config->{_cli_pin_sys_mode} = $cli_opts{pin_sys_mode} if defined $cli_opts{pin_sys_mode};
 
     $self->{effective_config} = $config;
     return $config;
@@ -164,8 +160,7 @@ sub store_user_config {
     # Load existing config
     my $existing = $self->_load_user_config() || {};
     
-    # Update with new values
-    for my $key (qw(preset session system_prompt system_file)) {
+    for my $key (qw(session system_prompt system_file system_persona pin_sys_mode)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
         }
@@ -173,17 +168,7 @@ sub store_user_config {
     if (defined $opts{pin_shims}) {
         $existing->{pin_shims} = $opts{pin_shims};
     }
-    if (defined $opts{pin_sys_mode}) {
-        $existing->{pin_sys_mode} = $opts{pin_sys_mode};
-    }
-
-    # Allow storing system prompt/file at user level too
-    for my $key (qw(system_prompt system_file)) {
-        if (defined $opts{$key}) {
-            $existing->{$key} = $opts{$key};
-        }
-    }
-
+    
     sel 1, "Saving user config as YAML at: $user_config_file";
     return $self->{storage}->save_yaml($user_config_file, $existing);
 }
@@ -191,9 +176,7 @@ sub store_user_config {
 sub store_session_config {
     my ($self, %opts) = @_;
     
-    return undef unless $self->{session_name};
-    
-    my $session_dir = $self->_get_session_dir();
+    my $session_dir = $self->{storage}->get_session_dir($self->{session_name});
     make_path($session_dir) unless -d $session_dir;
     
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
@@ -205,7 +188,7 @@ sub store_session_config {
     $existing->{created} = time() unless exists $existing->{created};
     
     # Update with new values
-    for my $key (qw(preset system_prompt system_file)) {
+    for my $key (qw(system_prompt system_file system_persona pin_sys_mode)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
         }
@@ -213,10 +196,8 @@ sub store_session_config {
     if (defined $opts{pin_shims}) {
         $existing->{pin_shims} = $opts{pin_shims};
     }
-    if (defined $opts{pin_sys_mode}) {
-        $existing->{pin_sys_mode} = $opts{pin_sys_mode};
-    }
     
+    sel 1, "Saving session config as YAML at: $session_config_file";
     return $self->{storage}->save_yaml($session_config_file, $existing);
 }
 

@@ -98,10 +98,12 @@ __z_opts() {
 -E --edit-hist --eh
 --su --S --store-user
 --store-session --ss
---system
---system-file
+--system --sys
+--system-file --sfile
+--system-string --sstr
+--system-persona --spersona --persona
 --think --thought
--L --list-presets
+-L --list-sys --sys-list
 --fallbacks-ok
 --help-pins
 --pin

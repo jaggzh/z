@@ -8,7 +8,6 @@ use ZChat::Core;
 use ZChat::Config;
 use ZChat::Storage;
 use ZChat::Pin;
-use ZChat::Preset;
 use ZChat::Utils ':all';
 
 our $VERSION = '1.0.0';
@@ -18,7 +17,7 @@ sub new {
     
     my $self = {
         session_name => ($opts{session} // ''),
-        preset => $opts{preset},
+        system => $opts{system},
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},
         pin_shims => $opts{pin_shims},
@@ -26,7 +25,6 @@ sub new {
         core => undef,
         storage => undef,
         pin_mgr => undef,
-        preset_mgr => undef,
     };
     
     bless $self, $class;
@@ -46,20 +44,6 @@ sub new {
         storage => $self->{storage},
         session_name => $self->{session_name}
     );
-
-	# Presets setup
-    my %preset_opts = (
-    	storage => $self->{storage},
-	);
-	if (exists $ENV{ZCHAT_DATADIR}) {
-		my $data_dir = File::Spec->catdir($ENV{ZCHAT_DATADIR}, 'sys');
-		if ($data_dir ne '' && -d $data_dir) {
-			$preset_opts{data_dir} = $data_dir;
-		} else {
-			$preset_opts{data_dir} = undef;
-		}
-	}
-    $self->{preset_mgr} = ZChat::Preset->new(%preset_opts);
 
     $self->{core} = ZChat::Core->new();
     
@@ -181,61 +165,89 @@ sub _select_system_source {
     my ($self) = @_;
     my $cfg = $self->{config}->get_effective_config();
 
-    # Determine source precedence: CLI > session > user > preset
-    my %src = (
-        cli     => { file => $cfg->{_cli_system_file},  prompt => $cfg->{_cli_system_prompt} },
-        session => { file => $cfg->{system_file_session}, prompt => $cfg->{system_prompt_session} },
-        user    => { file => $cfg->{system_file_user},   prompt => $cfg->{system_prompt_user} },
+    # Determine source precedence across scopes: CLI > session > user
+    # Intra-scope priority: file > str > persona
+    my @levels = (
+        { lvl => 'CLI',     file => $cfg->{_cli_system_file},     str => $cfg->{_cli_system_str},     persona => $cfg->{_cli_system_persona} },
+        { lvl => 'SESSION', file => $cfg->{system_file_session},  str => $cfg->{system_prompt_session}, persona => $cfg->{system_persona_session} },
+        { lvl => 'USER',    file => $cfg->{system_file_user},     str => $cfg->{system_prompt_user},  persona => $cfg->{system_persona_user} },
     );
 
-    # Prefer file over prompt at the same level
-    for my $level (qw(cli session user)) {
-        if ($src{$level}{file}) {
-            return ($level, file   => $src{$level}{file});
-        }
-        if ($src{$level}{prompt}) {
-            return ($level, prompt => $src{$level}{prompt});
-        }
+    for my $L (@levels) {
+        if ($L->{file})    { return ($L->{lvl}, file    => $L->{file}); }
+        if ($L->{str})     { return ($L->{lvl}, str     => $L->{str}); }
+        if ($L->{persona}) { return ($L->{lvl}, persona => $L->{persona}); }
     }
-    return ('preset', preset => $cfg->{preset}); # fallback
+    return ('NONE');
+}
+
+sub _resolve_system_file {
+    my ($self, $path) = @_;
+    return $path if File::Spec->file_name_is_absolute($path) && -f $path;
+
+    my @roots;
+    my $session_dir = eval { $self->{storage}->get_session_dir($self->{config}->get_effective_config->{session}) };
+    push @roots, $session_dir if $session_dir && -d $session_dir;
+
+    my $user_dir = $self->{config}->_get_config_dir;
+    push @roots, $user_dir if $user_dir && -d $user_dir;
+
+    push @roots, Cwd::getcwd(); # optional third root
+
+    for my $root (@roots) {
+        my $candidate = File::Spec->catfile($root, $path);
+        return $candidate if -f $candidate;
+    }
+
+    my $roots_str = join(", ", @roots);
+    die "system-file not found: '$path' (searched: $roots_str)\n";
+}
+
+sub _resolve_persona_path {
+    my ($self, $name) = @_;
+    my $cmd = "persona --path find " . $name;
+    my $path = `$cmd`;
+    chomp $path if defined $path;
+    die "persona '$name' not found (command: $cmd)\n" unless defined $path && $path ne '' && -f $path;
+    return $path;
 }
 
 sub _get_system_content {
     my ($self) = @_;
     
     my ($level, $kind, $val) = $self->_select_system_source();
-    my $content = '';
-    
-    if ($level eq 'preset') {
-        if ($val) {
-            sel(2, "Selected system content from PRESET: '$val'");
-            my $preset_content = $self->{preset_mgr}->resolve_preset($val);
-            if ($preset_content) {
-                sel(2, "Got preset content, length: " . length($preset_content));
-                $content = $preset_content;
-            } else {
-                sel(2, "Preset '$val' not found; empty system content");
-            }
-        } else {
-            sel(2, "No preset configured; empty system content");
-        }
-    } else {
-        if ($kind eq 'file') {
-            sel(2, sprintf "Selected system content from %s: system_file=%s (overrides lower levels)", uc($level), $val);
-            my $file_content = read_file($val);
-            $content = defined $file_content ? $file_content : '';
-            sel(2, "Loaded system file length: " . length($content));
-        } else { # prompt
-            my $len = defined($val) ? length($val) : 0;
-            sel(2, sprintf "Selected system content from %s: system_prompt (len=%d) (overrides lower levels)", uc($level), $len);
-            $content = $val // '';
-        }
+    my $content;
+
+    if ($level eq 'NONE') {
+        sel(2, "No system source selected; system message will be empty");
+        return undef;
     }
 
-    my $final = $content ne '' ? $content : undef;
-    sel(2, $final ? "Final system content length: " . length($final) : "No final system content");
+    if ($kind eq 'file') {
+        sel(2, sprintf "Selected system source: %s system_file=%s", $level, $val);
+        my $abs = $self->_resolve_system_file($val);
+        sel(2, "Resolved system_file => $abs");
+        $content = read_file($abs);
+        die "system-file '$abs' unreadable or empty\n" unless defined $content && $content ne '';
+        sel(2, "Loaded system file length: " . length($content));
+    }
+    elsif ($kind eq 'str') {
+        my $len = defined($val) ? length($val) : 0;
+        sel(2, sprintf "Selected system source: %s system_str (len=%d)", $level, $len);
+        $content = $val // '';
+        die "empty --system-str provided\n" if $content eq '';
+    }
+    elsif ($kind eq 'persona') {
+        sel(2, sprintf "Selected system source: %s system_persona=%s", $level, $val);
+        my $ppath = $self->_resolve_persona_path($val);
+        sel(2, "persona resolved => $ppath");
+        $content = read_file($ppath);
+        die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';
+        sel(2, "Loaded persona content length: " . length($content));
+    }
 
-    if ($final) {
+    # Render Xslate variables if present (no concatenation)
+    if ($content) {
         require Text::Xslate;
         require POSIX;
         # Collect system pins as template vars
@@ -252,10 +264,11 @@ sub _get_system_content {
             pins          => $sys_pins_ar,   # array of system pin strings
             pins_str      => $pins_str,      # "\n" joined system pins
         };
-        $final = $tpl->render_string($final, $vars);
+        $content = $tpl->render_string($content, $vars);
     }
 
-    return $final;
+    sel(2, "Final system content length: " . length($content)) if defined $content;
+    return $content;
 }
 
 sub _manage_context {

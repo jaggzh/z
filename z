@@ -16,6 +16,7 @@ use ZChat::Utils ':all';
 
 use bansi;
 use Getopt::Long::Descriptive;
+# use Getopt::Long::Descriptive::Opts;
 use POSIX qw(strftime);
 use LWP::UserAgent;
 use JSON::XS;
@@ -67,30 +68,36 @@ my ($opt, $usage) = describe_options(
     'z %o [prompt]',
     [ 'help|h',             "This beautiful help" ],
     [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
-    [ 'verbose_resp|vr+',   "Verbose response data" ],
+    [ 'verbose-resp|vr+',   "Verbose response data" ],
     [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt) (This is old and needs updating)" ],
-    [ 'clipboard|cb',       "Use clipboard content" ],
-    [ 'interactive|int|i',  "Interactive mode" ],
+    [ 'clipboard|cb',       "Use clipboard content as Query" ],
+    [ 'interactive|int|i',  "Interactive mode (query on CLI can be included as first message)" ],
     [ 'echo1|e',            "Echo back initial prompt" ],
     [ 'echo-delineated|echod|ee', "Echo with <echo></echo> and <reply></reply> tags" ],
     [ 'raw|r',              "Raw output (no processing)" ],
-    [ 'tokens_full',        "Output tokens of input text" ],
-    [ 'token_count|T',      "Count tokens in input text" ],
+    [ 'tokens-full',        "Output tokens of input text" ],
+    [ 'token-count|T',      "Count tokens in input text" ],
     [ 'ctx',                "Get running model n_ctx" ],
     [ 'metadata',           "Get running model metadata" ],
     [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
-    [ 'play_user|pu',       "Play user text with TTS" ],
-    [ 'play_resp|pr',       "Play response text with TTS" ],
+    [ 'play-user|pu',       "Play user text with TTS" ],
+    [ 'play-resp|pr',       "Play response text with TTS" ],
     [ 'probs:s',            "Return probabilities for top N tokens" ],
     [ 'no-color|nc',        "Disable color in interactive mode" ],
     [ 'grammar|g=s',        "Force a grammar" ],
-    [ 'preset|p|t=s',       "Use this preset (was -t tasktype in old version)" ],
-    [ 'session|n=s',        "Session name (slash-separated path)" ],
-    [ 'store-user|su|S',    "Store preset/session in user global config" ],
-    [ 'store-session|ss',   "Store preset in current session config" ],
-    [ 'system=s',           "Set system prompt (overrides preset)" ],
-    [ 'system-file=s',      "Set system prompt from file (overrides preset)" ],
+    [ 'store-user|su|S',    "Store session in user global config" ],
+    [ 'store-session|ss',   "Store in current session config" ],
     [ 'thought|think',      "Do not remove reasoning sections" ],
+    [ 'thought-re|tre',       "Specify a regex for stripping reasoning" ],
+    [],
+    [ 'Session management:' ],
+    [ 'session|n=s',        "Session name (slash-separated path)" ],
+    [],
+    [ 'System Prompt:' ],
+    [ 'system-str|sstr=s', "Set system prompt as a literal string (highest explicit source after file)" ],
+    [ 'system-file|sfile=s', "Set system prompt from a file (relative paths allowed)" ],
+    [ 'system-persona|spersona|persona=s', "Set system prompt by persona name (resolved by persona tool)" ],
+    [ 'system|sys=s',      "Auto-resolve through -file then -persona (but does NOT accept a string)" ],
     [],
     [ 'History:' ],
     [ 'wipe|w',             "Wipe conversation history" ],
@@ -101,9 +108,8 @@ my ($opt, $usage) = describe_options(
     [ 'output-last|conv1|c1=s', "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
     [],
     [ 'Utility:' ],
-    [ 'list-presets|L',     "List available presets" ],
+    [ 'list-sys|sys-list|L', "List available file and 'persona'-based system prompts." ],
     [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
-
     [],
     [ 'Message pinning:' ],
     [ 'help-pins',          "Show detailed help for pinning" ],
@@ -186,10 +192,20 @@ if (defined $uprompt) {
     }
 }
 
-# Validate system prompt options
-if (defined $opt->system && defined $opt->system_file) {
-    die "${bred}ERROR: Cannot use both --system and --system-file$rst\n";
-}
+# # Validate system prompt options
+# # I think this is handled in the module now.
+# my @conflict_pairs = qw(system system-file system-string system-persona);
+# for my $i (0 .. $#conflict_pairs+1) {
+#     for my $j ($i+1 .. $#conflict_pairs+1) {
+#         my $a = $conflict_pairs[$i];
+#         my $b = $conflict_pairs[$i];
+#         if ($opt->_specified($a) && $opt->_specified($b)) {
+#             $a =~ s/_/-/g; # Done with them, just reuse
+#             $b =~ s/_/-/g;
+#             die "${bred}ERROR: Cannot use both --$a and --$b simultaneously$rst\n";
+#         }
+#     }
+# }
 
 # Handle images and clipboard
 my @image_data;
@@ -236,19 +252,38 @@ if ($opt->image) {
 # Initialize ZChat
 my $zchat = ZChat->new(
     session => $opt->session // '',
-    preset => $opt->preset,
-    system_prompt => $opt->system,
-    system_file => $opt->system_file,
+    system       => $opt->system,
+    system_file  => $opt->system_file,
+    system_str   => $opt->system_str,
+    system_persona => $opt->system_persona,
     verbose => $verbose,
     pin_shims => (defined $opt->pin_shim ? { user=>$opt->pin_shim, assistant=>$opt->pin_shim } : undef),
     pin_sys_mode => ($opt->pin_sys_mode // undef),
 );
 
 # Handle utility commands first
-if ($opt->list_presets) {
-    my $presets = $zchat->{preset_mgr}->list_presets();
-    say "Available presets:";
-    say "  $_" for @$presets;
+if ($opt->list_sys) {
+    # Files under $ZCHAT_DATADIR/sys (if present) and personas from `persona --list`
+    my @files;
+    my $sys_dir;
+    if (exists $ENV{ZCHAT_DATADIR}) {
+        my $maybe = File::Spec->catdir($ENV{ZCHAT_DATADIR}, 'sys');
+        $sys_dir = $maybe if -d $maybe;
+    }
+    if ($sys_dir) {
+        opendir(my $dh, $sys_dir);
+        @files = sort grep { $_ !~ /^\./ && -f File::Spec->catfile($sys_dir, $_) } readdir($dh);
+        closedir $dh;
+    }
+    say "System files" . ($sys_dir ? " ($sys_dir)" : "") . ":";
+    say(@files ? map { "  $_" } @files : "  (none found)");
+    my @personas;
+    my $plist = `persona --list 2>/dev/null`;
+    if ($? == 0 && defined $plist) {
+        @personas = grep { length } map { chomp; $_ } split(/\n/, $plist);
+    }
+    say "Personas:";
+    say(@personas ? map { "  $_" } @personas : "  (none found or persona tool unavailable)");
     exit;
 }
 
@@ -416,7 +451,6 @@ for my $json (@{ $opt->pin_ua_json // [] }) {
         warn "Ignoring invalid --pin-ua-json payload";
     }
 }
-$DB::single=1;
 
 # History management
 if ($opt->wipe) {
@@ -428,39 +462,42 @@ if ($opt->wipe) {
         sel 0, "No-history mode - wiping only in memory.";
     } else {
         # Clear history through storage
-        $DB::single=1;
         $zchat->{storage}->save_history($zchat->get_session_name(), []);
         sel 1, "${yel}Conversation history wiped.$rst";
     }
     # exit unless defined $uprompt; # Other options might still be functioning even if wipe was done (like storing settings), so don't exit.
 }
 
-# Storage operations
+# Storage operations (These come BEFORE being blocked by edit history)
 if ($opt->store_user) {
     my %store_opts;
-    $store_opts{preset} = $opt->preset if $opt->preset;
     $store_opts{session} = $opt->session if $opt->session;
-    $store_opts{pin_shims} = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
 
-    $store_opts{system_prompt} = $opt->system if defined $opt->system;
-    $store_opts{system_file}   = $opt->system_file if defined $opt->system_file;
-    
-    # This shows Stored user config: preset.  I want it to show Stored user config: preset=> 
-    $DB::single=1;
+    $store_opts{system_prompt}  = $opt->system_str  if defined $opt->system_str;
+    $store_opts{system_file}    = $opt->system_file if defined $opt->system_file;
+    $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
+
+    $store_opts{pin_shims}   = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
+    $store_opts{pin_sys_mode}= $opt->pin_sys_mode if defined $opt->pin_sys_mode;
+
     $zchat->store_user_config(%store_opts);
-    sel 1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } keys %store_opts) if %store_opts;
+    sel(1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } sort keys %store_opts)) if %store_opts;
+    exit unless defined $uprompt;
 }
 
 if ($opt->store_session) {
     my %store_opts;
-    $store_opts{preset} = $opt->preset if $opt->preset;
-    $store_opts{pin_shims} = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
 
-    $store_opts{system_prompt} = $opt->system if defined $opt->system;
-    $store_opts{system_file}   = $opt->system_file if defined $opt->system_file;
+    $store_opts{system_prompt}  = $opt->system_str  if defined $opt->system_str;
+    $store_opts{system_file}    = $opt->system_file if defined $opt->system_file;
+    $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
+
+    $store_opts{pin_shims}   = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
+    $store_opts{pin_sys_mode}= $opt->pin_sys_mode if defined $opt->pin_sys_mode;
 
     $zchat->store_session_config(%store_opts);
-    sel 1, "Stored session config: " . join(", ", keys %store_opts) if %store_opts;
+    say "Stored session config: " . join(", ", sort keys %store_opts) if %store_opts;
+    exit unless defined $uprompt;
 }
 
 # Overwrite last message for a specific role (does not affect pins)
@@ -478,14 +515,14 @@ if (my $role_to_overwrite = $opt->owrite_last) {
     my $session_name = $zchat->get_session_name();
     my $messages = $zchat->{storage}->load_history($session_name);
     die "Cannot --owrite-last: conversation history is empty.\n" unless @$messages;
+    die "Cannot --owrite-last: No '$role_to_overwrite' message found to overwrite.\n" unless grep { $_->{role} && $_->{role} eq $role_to_overwrite } @$messages;
 
-    my $idx;
     for (my $i = $#$messages; $i >= 0; $i--) {
-        if ($messages->[$i]{role} && $messages->[$i]{role} eq $role_to_overwrite) { $idx = $i; last; }
+        if ($messages->[$i]{role} && $messages->[$i]{role} eq $role_to_overwrite) {
+            $messages->[$i]{content} = $uprompt;
+            last;
+        }
     }
-    die "No '$role_to_overwrite' message found to overwrite.\n" unless defined $idx;
-
-    $messages->[$idx]{content} = $uprompt;
     $zchat->{storage}->save_history($session_name, $messages);
     sel 1, "Successfully overwrote last '$role_to_overwrite' message in history.";
     exit;
@@ -539,7 +576,6 @@ if (!$intmode || $opt->no_color) {
 
 # Show session info
 sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . $zchat->get_session_name() . "$rst";
-sel 1, "${clr_notice_bg}${clr_notice_fg}Preset: " . ($zchat->get_preset() || 'none') . "$rst";
 
 # Terminal setup for interactive mode
 my $term;
@@ -578,10 +614,14 @@ while (1) {
         # Add probability tracking if requested
         $complete_opts{n_probs} = $opt->probs if defined $opt->probs;
         
-        # Handle remove pattern for thought removal
-        if ($zchat->{preset_mgr}) {
-            my $preset_metadata = $zchat->{preset_mgr}->get_preset_metadata($zchat->get_preset() || '');
-            if ($preset_metadata->{think} && !$opt->thought) {
+
+        if ($opt->thought && ($opt->thought_re//0)) {
+            die "Cannot specify both --thought and --thought-re.\n";
+        }
+        if (!$opt->thought) {
+            if ($opt->thought_re//0) {
+                $complete_opts{remove_pattern} = $opt->thought_re;
+            } else {
                 $complete_opts{remove_pattern} = qr/(?:<think>)?.*?<\/think>\s*/s;
             }
         }
@@ -655,9 +695,11 @@ z - Command-line interface to ZChat LLM system
     # Basic usage
     z "Hello, how are you?"
     
-    # With preset
-    z -p coding "Write a Perl function"
-    
+    # Choose/override a system prompt
+    z --system-file prompts/coding.md "Write a Perl function"
+    z --system-str  "You are terse"    "Refactor this module"
+    z --system-persona reviewer         "Do a design review"
+
     # Interactive mode
     z -i
     
@@ -668,8 +710,8 @@ z - Command-line interface to ZChat LLM system
     
     # Session management  
     z -n myproject/analysis "What should I focus on?"
-    z -p coding -S  # Store as user default
-    z -n project -p specialized --store-session  # Store in session
+    z --system-file prompts/base.md -S              # Store in user global config
+    z -n project --system-str "Prefer REST" --ss   # Store in current session
     
     # Images
     z --img photo.jpg "What's in this image?"
@@ -678,12 +720,13 @@ z - Command-line interface to ZChat LLM system
     # Utility
     z -T "Count tokens in this text"
     z --ctx  # Show model context size
-    z --list-presets
+    z --list-sys | -L  # List file and 'persona'-based system prompts
 
 =head1 DESCRIPTION
 
 Command-line interface to the ZChat modular LLM system. Supports
-conversation history, pinned messages, presets, sessions, and more.
+conversation history, pinned messages, sessions, and more.  System prompts
+are sourced from files, literal strings, or personas with clear precedence.
 
 =cut
 # vim: et

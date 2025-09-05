@@ -167,6 +167,22 @@ sub append_to_history {
     return write_json_file($history_file, $history, { min=>1 });
 }
 
+sub wipe_history {
+    my ($self, $session_name) = @_;
+    return 0 unless $session_name;
+    my $session_dir = $self->get_session_dir($session_name);
+    return 0 unless $session_dir;
+    my $history_file = File::Spec->catfile($session_dir, 'history.json');
+    sel 1, "wipe_history(): History file => " . ($history_file // 'undef');
+    if (-e $history_file) {
+        unlink $history_file or do {
+            warn "Failed to remove history file '$history_file': $!";
+            return 0;
+        };
+    }
+    return 1;
+}
+
 # Pin operations
 sub load_pins {
     my ($self, $session_name) = @_;

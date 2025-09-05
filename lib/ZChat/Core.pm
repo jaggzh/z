@@ -50,9 +50,6 @@ sub complete_request {
     my $min_p = $opts->{min_p} || 0.08;
     my $n_predict = $opts->{n_predict} || 8192;
     my $stream = $opts->{stream} // 1;
-    my $raw = $opts->{raw} || 0;
-    my $show_thought = $opts->{show_thought} || 0;
-    my $remove_pattern = $opts->{remove_pattern};
     
     # Get model info
     my $model_info = $self->get_model_info();
@@ -89,10 +86,7 @@ sub complete_request {
 sub _stream_completion {
     my ($self, $data, $opts) = @_;
     
-    my $raw = $opts->{raw} || 0;
-    my $remove_pattern = $opts->{remove_pattern};
-    my $show_thought = $opts->{show_thought} || 0;
-    my $live_output = $raw || (!$remove_pattern || $show_thought);
+    my $on_chunk = $opts->{on_chunk};
     
     my $ua = Mojo::UserAgent->new(max_response_size => 0);
     my $tx = $ua->build_tx(
@@ -140,8 +134,10 @@ sub _stream_completion {
                     # Clean up first token
                     $chunk =~ s/^\s+// unless $token_count;
                     
-                    # Output if live mode
-                    print $chunk if $live_output && $chunk ne '';
+                    # Send chunk to callback if provided
+                    if ($on_chunk && $chunk ne '') {
+                        $on_chunk->($chunk);
+                    }
                     
                     $answer .= $chunk;
                     $token_count++;
@@ -152,17 +148,6 @@ sub _stream_completion {
     
     # Execute request
     $ua->start($tx);
-    
-    # Post-process if needed
-    if (!$live_output) {
-        if ($remove_pattern && !$show_thought) {
-            $answer =~ s/$remove_pattern//s;
-        }
-        print $answer;
-    }
-    
-    # Ensure newline at end
-    print "\n" if $answer && $answer !~ /\n$/;
     
     return $answer;
 }

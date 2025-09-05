@@ -283,13 +283,12 @@ if ($opt->thought && ($opt->thought_re//0)) {
     die "Conflict trying to both enable thoughts (--thought) and providing a removal regex (--thought-re).\n";
 }
 if ($opt->thought) {
-    sel 1, "Thought-display ENABLED.";
-    $zchat->set_thought({ enabled => 0 });
+    $zchat->set_thought(mode => 'disabled');
+} elsif ($opt->thought_re) {
+    $zchat->set_thought(mode => 'enabled', pattern => $opt->thought_re);
 } else {
-    if ($opt->thought_re) {
-        sel 1, "Thought-removal forced with provided pattern.";
-        $zchat->set_thought({ pattern => qr/$$opt{thought_re}/ });
-    }
+    # Default: auto-detect from system prompt  
+    $zchat->set_thought(mode => 'auto');
 }
 
 # History mode mapping

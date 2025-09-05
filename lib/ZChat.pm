@@ -18,7 +18,7 @@ use ZChat::SystemPrompt;
 
 our $VERSION = '1.1.0';
 
-my $def_thought_re = qr{(?:<think>)?.*?<\/think>\s*};
+my $def_thought_re = qr{(?:<think>)?.*?<\/think>\s*}s;
 
 sub new {
     my ($class, %opts) = @_;
@@ -34,7 +34,7 @@ sub new {
         storage      => undef,
         pin_mgr      => undef,
         history      => undef,
-        _thought     => { enabled => 1, pattern => qr/(?:<think>)?.*?<\/think>\s*/s },
+        _thought     => { mode => 'auto', pattern => undef }, # mode: auto|disabled|enabled
         _fallbacks_ok => 0,
         _print_target    => undef,   # undef (silent) | *FH
         _on_chunk        => undef,   # optional streaming callback
@@ -113,24 +113,6 @@ sub _load_config {
         pin_sys_mode => $opts{pin_sys_mode},
     );
 }
-
-# # High level is handled through ->query(). Remove this
-# sub complete {
-#     my ($self, $user_input, $opts={}) = @_;
-    
-#     # Build complete message array with pins
-#     my $messages = $self->_build_messages($user_input, $opts);
-    
-#     # Get model info for context management
-#     my $model_info = $self->{core}->get_model_info();
-#     my $max_tokens = $model_info->{n_ctx} // 8192;
-    
-#     # Truncate history if needed
-#     $messages = $self->_manage_context($messages, $max_tokens);
-    
-#     # Make completion request
-#     return $self->{core}->complete_request($messages, $opts);
-# }
 
 sub _build_messages($self, $user_input, $opts={}) {
     
@@ -372,22 +354,201 @@ sub history { $_[0]{history} }
 sub system  { $_[0]{system_prompt} }
 
 sub set_thought {
-    my ($self, $opts) = @_;
-	if (($opts->{pattern}//'') eq /^\s*$/) {
-		sel 0, "Empty/undef/whitespace thought pattern provided. Thought removal has been disabled and streaming may be active.";
-		$self->{_thought}{enabled} = 0;
-		$self->{_thought}{pattern} = undef;
-	} else {
-		if ($opts->{pattern} // 0) { # Pattern provided
-			$self->{_thought}{pattern} = $opts->{pattern};
-			$self->{_thought}{enabled} = 1;
-		} elsif (exists $self->{_thought}{enabled}) {
-			sel 1, "Default thought pattern enabled ($def_thought_re)";
-			$self->{_thought}{pattern} = $def_thought_re;
-			$self->{_thought}{enabled} = 1;
-		}
-	}
+    my ($self, %opts) = @_;
+    
+    # Handle conflicts first
+    if (defined $opts{mode} && defined $opts{pattern}) {
+        if ($opts{mode} eq 'disabled' && $opts{pattern}) {
+            die "Cannot disable thought filtering while also providing a pattern\n";
+        }
+    }
+    
+    if (defined $opts{mode}) {
+        if ($opts{mode} eq 'disabled') {
+            $self->{_thought}{mode} = 'disabled';
+            $self->{_thought}{pattern} = undef;
+            sel 1, "Thought filtering DISABLED - all reasoning will be shown";
+        }
+        elsif ($opts{mode} eq 'enabled') {
+            $self->{_thought}{mode} = 'enabled';
+            if (defined $opts{pattern}) {
+                $self->{_thought}{pattern} = $opts{pattern};
+                sel 1, "Thought filtering ENABLED with custom pattern";
+            } else {
+                $self->{_thought}{pattern} = $def_thought_re;
+                sel 1, "Thought filtering ENABLED with default pattern";
+            }
+        }
+        elsif ($opts{mode} eq 'auto') {
+            $self->{_thought}{mode} = 'auto';
+            $self->{_thought}{pattern} = undef;
+            sel 1, "Thought filtering set to AUTO-DETECT from system prompt";
+        }
+        else {
+            die "Invalid thought mode '$opts{mode}' - must be 'auto', 'enabled', or 'disabled'\n";
+        }
+    }
+    elsif (defined $opts{pattern}) {
+        # Pattern provided without mode - assume enabled
+        if (($opts{pattern} // '') =~ /^\s*$/) {
+            warn "Empty or whitespace-only thought pattern provided - thought filtering disabled\n";
+            $self->{_thought}{mode} = 'disabled';
+            $self->{_thought}{pattern} = undef;
+        } else {
+            $self->{_thought}{mode} = 'enabled';
+            $self->{_thought}{pattern} = $opts{pattern};
+            sel 1, "Thought filtering ENABLED with provided pattern";
+        }
+    }
+    
     return $self;
+}
+
+sub _auto_detect_thought_pattern {
+    my ($self, $system_content) = @_;
+    
+    return unless $self->{_thought}{mode} eq 'auto';
+    return unless defined $system_content && length $system_content;
+    
+    # Look for ==== z think <pattern>
+    if ($system_content =~ /^==== *z *think\s+(.+)$/m) {
+        my $pattern_str = $1;
+        chomp $pattern_str;
+        eval {
+            my $pattern = qr/$pattern_str/s;
+            $self->{_thought}{pattern} = $pattern;
+            sel 1, "Auto-detected thought pattern from system prompt: $pattern_str";
+        };
+        if ($@) {
+            warn "Invalid regex in system prompt thought pattern '$pattern_str': $@\n";
+        }
+    }
+    # Look for ==== z think (no pattern = use default)
+    elsif ($system_content =~ /^==== *z *think\s*$/m) {
+        $self->{_thought}{pattern} = $def_thought_re;
+        sel 1, "Auto-detected default thought pattern from system prompt";
+    }
+}
+
+sub _should_filter_thoughts {
+    my ($self) = @_;
+    
+    return 0 if $self->{_thought}{mode} eq 'disabled';
+    return 1 if $self->{_thought}{mode} eq 'enabled' && defined $self->{_thought}{pattern};
+    return 1 if $self->{_thought}{mode} eq 'auto' && defined $self->{_thought}{pattern};
+    return 0;
+}
+
+sub _should_stream {
+    my ($self, $opts) = @_;
+    
+    # If user explicitly requests no streaming, honor it
+    return 0 if defined $opts->{stream} && !$opts->{stream};
+    
+    # If thought filtering is active, force non-streaming so regex can work on complete text
+    return 0 if $self->_should_filter_thoughts();
+    
+    # Default to streaming
+    return 1;
+}
+
+sub _apply_thought_filter {
+    my ($self, $text) = @_;
+    
+    return $text unless $self->_should_filter_thoughts();
+    
+    my $pattern = $self->{_thought}{pattern};
+    return $text unless defined $pattern;
+    
+    my $original_length = length($text);
+    $text =~ s/$pattern//gs;
+    my $filtered_length = length($text);
+    
+    if ($original_length != $filtered_length) {
+        sel 2, "Filtered " . ($original_length - $filtered_length) . " characters of reasoning content";
+    }
+    
+    return $text;
+}
+
+sub query($self, $user_text, $opts={}) {
+    my $print_fh;
+    if (exists $opts->{print}) {
+		$print_fh = _validate_print_opt($opts->{print});
+	} elsif ($self->{_print_target}) {
+        $print_fh = $self->{_print_target};
+    }
+    my $on_chunk = exists $opts->{on_chunk} ? $opts->{on_chunk} : $self->{_on_chunk};
+
+    $self->{history}->load();
+
+    # Get system content and auto-detect thought patterns
+    my $system_content = $self->_get_system_content();
+    $self->_auto_detect_thought_pattern($system_content);
+
+    # Decide streaming based on thought filtering
+    my $should_stream = $self->_should_stream($opts);
+    
+    if (!$should_stream && $self->_should_filter_thoughts()) {
+        sel 2, "Forcing non-streaming mode for thought pattern filtering";
+    }
+
+    # Build messages
+    my $pins_msgs = $self->{pin_mgr}->build_message_array();
+    my @context   = @{ $self->{history}->messages() // [] };
+    my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
+
+    # Add system message if we have content
+    if ($system_content) {
+        unshift @messages, { role => 'system', content => $system_content };
+    }
+
+    my $raw_response = '';
+    
+    if ($should_stream) {
+        my $cb = sub ($piece) {
+            $raw_response .= $piece;
+            if ($on_chunk) {
+                $on_chunk->($piece);
+            } elsif ($print_fh) {
+                print $print_fh $piece;
+            }
+        };
+        $self->{core}->complete_request(\@messages, { 
+            stream => 1,
+            on_chunk => $cb, 
+            fallbacks_ok => $self->{_fallbacks_ok} 
+        });
+    } else {
+        $raw_response = $self->{core}->complete_request(\@messages, { 
+            stream => 0,
+            fallbacks_ok => $self->{_fallbacks_ok} 
+        });
+        
+        # Apply thought filtering to complete response
+        my $filtered_response = $self->_apply_thought_filter($raw_response);
+        
+        # Output the filtered result
+        if ($print_fh && !$on_chunk) {
+            print $print_fh $filtered_response;
+        }
+        if ($on_chunk) {
+            $on_chunk->($filtered_response);
+        }
+        
+        # Use filtered version for return and storage
+        $raw_response = $filtered_response;
+    }
+    if ($raw_response !~ /\n$/) {
+    	print $print_fh "\n";
+	}
+
+    # Store in history
+    $self->{history}->append('user', $user_text);
+    $self->{history}->append('assistant', $raw_response);
+    $self->{history}->save();
+
+    return $raw_response;
 }
 
 sub set_allow_fallbacks {
@@ -399,7 +560,7 @@ sub set_allow_fallbacks {
 sub set_print($self, $target) {
 	my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
 	my $print_fh = _validate_print_opt($target);
-    $self->{_print_target} = $target;   # GLOB/IO handle
+    $self->{_print_target} = $print_fh;
     return $self;
 }
 
@@ -434,14 +595,6 @@ sub list_system_prompts {
     return { files => \@files, personas => \@personas, dir => $sys_dir };
 }
 
-sub _apply_thought_filter {
-    my ($self, $text) = @_;
-    return $text if $self->{_thought}{enabled}; # Return untouched
-    return $text if $self->{_thought}{pattern} // 0; # No default stripping.
-    $text =~ s/$$self{_thought}{pattern}//;
-    return $text;
-}
-
 sub _validate_print_opt($target) {
 	# Target: 0(silent), 1(*STDOUT), or an open GLOB/IO handle
 	my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
@@ -456,61 +609,6 @@ sub _validate_print_opt($target) {
 	} else { $print_fh = $target;   # GLOB/IO handle
     }
     return $print_fh;
-}
-
-sub query($self, $user_text, $opts={}) {
-    my $print_fh;
-    if (exists $opts->{print}) {
-		$print_fh = _validate_fh($opts->{print});
-	}
-    my $on_chunk = exists $opts->{on_chunk} ? $opts->{on_chunk} : $self->{_on_chunk};
-    my $stream   = $opts->{stream} ? 1 : 0;
-
-    if ($stream && $self->{_thought}{enabled} && defined $self->{_thought}{pattern}) {
-        # Too common to revert to non-streaming. We won't notify.
-        if ($self->{_fallbacks_ok}) {
-            # warn "$msg\n";
-            $stream = 0;
-        }
-    }
-
-    $self->{history}->load();
-
-    my $resolved = $self->{system_prompt}->resolve();
-    if ($resolved && $resolved->{source} eq 'str') {
-        # no file IO needed; ok
-    }
-
-    my $pins_msgs = $self->{pin_mgr}->build_message_array();
-    my @context   = @{ $self->{history}->messages() // [] };
-    my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
-
-    my $accum = '';
-    if ($stream) {
-        my $cb = sub ($piece) {
-            $accum .= $piece;
-            if ($on_chunk) {
-                $on_chunk->($piece);
-            } elsif ($print_fh) {
-                print $print_fh $piece;
-            }
-        };
-        $self->{core}->complete_request(\@messages, { on_chunk => $cb, fallbacks_ok => $self->{_fallbacks_ok} });
-    } else {
-        my $full = $self->{core}->complete_request(\@messages, { fallbacks_ok => $self->{_fallbacks_ok} });
-        $accum = $full;
-        if ($print_fh && !$on_chunk) {
-            print $print_fh $accum;
-        }
-    }
-
-    my $clean = $self->_apply_thought_filter($accum);
-
-    $self->{history}->append('user', $user_text);
-    $self->{history}->append('assistant', $clean);
-    $self->{history}->save();
-
-    return $clean;
 }
 
 sub history_owrite_last {

@@ -162,7 +162,7 @@ _z() {
   }
 
   case "$prev" in
-    -p|--preset|-t|--tasktype)
+    --sys|--system|--system-persona|--preset|-t|--tasktype)
       COMPREPLY=()
       __complete_presets "$cur"
       return 0

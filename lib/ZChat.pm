@@ -209,7 +209,9 @@ sub _resolve_system_file {
 
 sub _resolve_persona_path {
     my ($self, $name) = @_;
-    my $cmd = "persona --path find " . $name;
+    my @cmd = qw(persona --path find), $name;
+    my $cmd = shell_quote(@cmd);
+    sel 1, "RESOLVE system prompt -- ATTEMPT with persona. Cmd: `$cmd`";
     my $path = `$cmd`;
     chomp $path if defined $path;
     die "persona '$name' not found (command: $cmd)\n" unless defined $path && $path ne '' && -f $path;

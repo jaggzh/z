@@ -273,10 +273,10 @@ my $zchat = ZChat->new(
 $zchat->set_print(1); # Module default is silent.
 
 # System prompt setters from CLI (provenance=CLI)
-if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, scope=>'CLI') }
-if (defined $opt->system_str)     { $zchat->system->set_str($opt->system_str, scope=>'CLI') }
-if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, scope=>'CLI') }
-if (defined $opt->system)         { $zchat->system->set_auto($opt->system, scope=>'CLI') }
+if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, { scope=>'CLI' } ) }
+if (defined $opt->system_str)     { $zchat->system->set_str($opt->system_str, { scope=>'CLI' } ) }
+if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, { scope=>'CLI' } ) }
+if (defined $opt->system)         { $zchat->system->set_auto($opt->system, { scope=>'CLI' } ) }
 
 # Thought removal policy from CLI
 if ($opt->thought && ($opt->thought_re//0)) {
@@ -296,8 +296,11 @@ if ($opt->no_history) { $zchat->history->set_mode('none') }
 elsif ($opt->input_only) { $zchat->history->set_mode('ro') }
 else { $zchat->history->set_mode('rw') }
 
-# Wipe (persistent)
-if ($opt->wipe) { $zchat->history->wipe() }
+# Wipe (on-disk history)
+if ($opt->wipe) {
+    $zchat->history->wipe();
+    sel 1, "${yel}Conversation history wiped.$rst";
+}
 
 # Utility: list system prompts
 if ($opt->list_sys) {
@@ -483,9 +486,7 @@ if ($opt->wipe) {
         # This may be unexpected behavior so notify
         sel 0, "No-history mode - wiping only in memory.";
     } else {
-        # Clear history through storage
-        $zchat->{storage}->save_history($zchat->get_session_name(), []);
-        sel 1, "${yel}Conversation history wiped.$rst";
+        # Already wiped earlier.
     }
     # exit unless defined $uprompt; # Other options might still be functioning even if wipe was done (like storing settings), so don't exit.
 }

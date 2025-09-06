@@ -32,7 +32,6 @@ sub load_effective_config {
     # 1. System defaults
     my $system_defaults = $self->_get_system_defaults();
     %$config = (%$config, %$system_defaults);
-    sel(2, "Setting preset '$config->{preset}' from system defaults");
     
     # 2. User global config
     my $user_config = $self->_load_user_config();
@@ -135,7 +134,7 @@ sub _load_user_config {
     my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
     sel 1, "Loading User config file: $user_config_file";
     my $yaml = $self->{storage}->load_yaml($user_config_file);
-    sel 2, "  YAML result: ", ($yaml // 'unable to load');
+    sel 3, "  YAML result: ", ($yaml // 'unable to load');
     return $yaml;
 }
 
@@ -148,7 +147,7 @@ sub _load_session_config {
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
     sel 1, "Loading Session config file: $session_config_file";
     my $yaml = $self->{storage}->load_yaml($session_config_file);
-    sel 2, "  YAML result: ", ($yaml // 'unable to load');
+    sel 3, "  YAML result: ", ($yaml // 'unable to load');
     
     return $yaml;
 }

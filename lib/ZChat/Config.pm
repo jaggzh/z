@@ -45,9 +45,10 @@ sub load_effective_config {
     $config->{session} = $effective_session;
     sel(2, "Using session '$effective_session'");
     
+    my $session_config;
     if ($effective_session) {
         $self->{session_name} = $effective_session;
-        my $session_config = $self->_load_session_config();
+        $session_config = $self->_load_session_config();
         if ($session_config) {
             %$config = (%$config, %$session_config);
             sel(2, "Loaded session config overrides");
@@ -58,17 +59,20 @@ sub load_effective_config {
     $config->{system_file_user}       = $user_config->{system_file}       if $user_config && defined $user_config->{system_file};
     $config->{system_prompt_user}     = $user_config->{system_prompt}     if $user_config && defined $user_config->{system_prompt};
     $config->{system_persona_user}    = $user_config->{system_persona}    if $user_config && defined $user_config->{system_persona};
-    if ($effective_session) {
-        my $session_config = $self->_load_session_config() || {};
+    $config->{system_user}            = $user_config->{system}            if $user_config && defined $user_config->{system};
+    
+    if ($session_config) {
         $config->{system_file_session}    = $session_config->{system_file}    if defined $session_config->{system_file};
         $config->{system_prompt_session}  = $session_config->{system_prompt}  if defined $session_config->{system_prompt};
         $config->{system_persona_session} = $session_config->{system_persona} if defined $session_config->{system_persona};
+        $config->{system_session}         = $session_config->{system}         if defined $session_config->{system};
     }
 
     # 4. CLI overrides (runtime only) — stash source-marked copies
     if (defined $cli_opts{system_str})  { $config->{system_prompt} = $cli_opts{system_str};  $config->{_cli_system_str}  = $cli_opts{system_str};  sel(2, "Setting system_str from CLI options"); }
     if (defined $cli_opts{system_file}) { $config->{system_file}   = $cli_opts{system_file}; $config->{_cli_system_file} = $cli_opts{system_file}; sel(2, "Setting system_file from CLI options"); }
     if (defined $cli_opts{system_persona}) { $config->{system_persona} = $cli_opts{system_persona}; $config->{_cli_system_persona} = $cli_opts{system_persona}; sel(2, "Setting system_persona from CLI options"); }
+    if (defined $cli_opts{system}) { $config->{system} = $cli_opts{system}; $config->{_cli_system} = $cli_opts{system}; sel(2, "Setting system from CLI options"); }
 
     # Preserve pin_shims / pin_sys_mode CLI handling
     if (defined $cli_opts{pin_shims}) {
@@ -163,7 +167,7 @@ sub store_user_config {
     # Load existing config
     my $existing = $self->_load_user_config() || {};
     
-    for my $key (qw(session system_prompt system_file system_persona pin_sys_mode)) {
+    for my $key (qw(session system_prompt system_file system_persona system pin_sys_mode)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
         }
@@ -191,9 +195,10 @@ sub store_session_config {
     $existing->{created} = time() unless exists $existing->{created};
     
     # Update with new values
-    for my $key (qw(system_prompt system_file system_persona pin_sys_mode)) {
+    for my $key (qw(system_prompt system_file system_persona system pin_sys_mode)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
+            sel 1, "Storing $key = $opts{$key} in session config";
         }
     }
     if (defined $opts{pin_shims}) {

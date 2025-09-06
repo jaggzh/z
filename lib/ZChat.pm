@@ -221,31 +221,36 @@ sub _resolve_persona_path {
 sub _get_system_content {
     my ($self) = @_;
     
-    my ($level, $kind, $val) = $self->_select_system_source();
-    my $content;
+    my $resolved = $self->{system_prompt}->resolve();
 
-    if ($level eq 'NONE') {
+    if (!$resolved) {
         sel(2, "No system source selected; system message will be empty");
         return undef;
     }
 
-    if ($kind eq 'file') {
-        sel(2, sprintf "Selected system source: %s system_file=%s", $level, $val);
-        my $abs = $self->_resolve_system_file($val);
+    my $source = $resolved->{source};
+    my $value = $resolved->{value};
+    my $provenance = $resolved->{provenance};
+    
+    sel(1, sprintf "Selected system source: %s %s=%s", $provenance, $source, $value);
+    
+    my $content;
+    
+    if ($source eq 'file') {
+        my $abs = $self->_resolve_system_file($value);
         sel(2, "Resolved system_file => $abs");
         $content = read_file($abs);
         die "system-file '$abs' unreadable or empty\n" unless defined $content && $content ne '';
         sel(2, "Loaded system file length: " . length($content));
     }
-    elsif ($kind eq 'str') {
-        my $len = defined($val) ? length($val) : 0;
-        sel(2, sprintf "Selected system source: %s system_str (len=%d)", $level, $len);
-        $content = $val // '';
-        die "empty --system-str provided\n" if $content eq '';
+    elsif ($source eq 'str') {
+        my $len = defined($value) ? length($value) : 0;
+        sel(2, sprintf "Using system_str (len=%d)", $len);
+        $content = $value // '';
+        die "empty system string provided\n" if $content eq '';
     }
-    elsif ($kind eq 'persona') {
-        sel(2, sprintf "Selected system source: %s system_persona=%s", $level, $val);
-        my $ppath = $self->_resolve_persona_path($val);
+    elsif ($source eq 'persona') {
+        my $ppath = $self->_resolve_persona_path($value);
         sel(2, "persona resolved => $ppath");
         $content = read_file($ppath);
         die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';

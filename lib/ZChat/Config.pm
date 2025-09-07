@@ -18,6 +18,7 @@ sub new {
         storage => ($opts{storage} // die "storage required"),
         session_name => ($opts{session_name} // ''),
         effective_config => {},
+        _session_config_cache => undef,  # Cache to avoid redundant loads
     };
     
     bless $self, $class;
@@ -147,11 +148,17 @@ sub _load_session_config {
     
     return undef unless $self->{session_name};
     
+    # Return cached version if available
+    return $self->{_session_config_cache} if defined $self->{_session_config_cache};
+    
     my $session_dir = $self->_get_session_dir();
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
     sel 1, "Loading Session config file: $session_config_file";
     my $yaml = $self->{storage}->load_yaml($session_config_file);
     sel 3, "  YAML result: ", ($yaml // 'unable to load');
+    
+    # Cache the result
+    $self->{_session_config_cache} = $yaml;
     
     return $yaml;
 }
@@ -188,8 +195,8 @@ sub store_session_config {
     
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
     
-    # Load existing config
-    my $existing = $self->_load_session_config() || {};
+    # Use cached session config if available, otherwise load it
+    my $existing = $self->{_session_config_cache} || $self->_load_session_config() || {};
     
     # Add created timestamp if new
     $existing->{created} = time() unless exists $existing->{created};
@@ -204,6 +211,9 @@ sub store_session_config {
     if (defined $opts{pin_shims}) {
         $existing->{pin_shims} = $opts{pin_shims};
     }
+    
+    # Update cache with new values
+    $self->{_session_config_cache} = $existing;
     
     sel 1, "Saving session config as YAML at: $session_config_file";
     return $self->{storage}->save_yaml($session_config_file, $existing);
@@ -347,7 +357,7 @@ ZChat::Config - Configuration management with precedence chain
     
     # Load effective configuration (system → user → session → CLI)
     my $effective = $config->load_effective_config(
-        preset => "coding",  # CLI override
+       ??
     );
     
     # Store configurations

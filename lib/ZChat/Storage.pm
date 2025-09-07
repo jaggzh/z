@@ -31,7 +31,7 @@ sub load_yaml {
     return undef unless -e $filepath;
     
     my $contents;
-    sel 2, " Loading a YAML file: $filepath";
+    sel 3, " Loading a YAML file: $filepath";  # Changed from level 2 to 3
     eval {
         $contents = LoadFile($filepath);
     };
@@ -52,7 +52,7 @@ sub save_yaml {
     
     my $old_umask = umask($self->{umask});
     
-    sel 2, " Saving a YAML file: $filepath";
+    sel 3, " Saving a YAML file: $filepath";  # Changed from level 2 to 3
     eval {
         DumpFile($filepath, $data);
     };

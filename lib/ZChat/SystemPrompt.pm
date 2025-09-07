@@ -5,8 +5,9 @@ use feature 'say';
 use experimental 'signatures';
 use strict;
 use warnings;
-
 use utf8;
+
+use ZChat::Utils ':all';
 
 sub new {
     my ($class, %opts) = @_;

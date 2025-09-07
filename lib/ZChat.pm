@@ -7,6 +7,10 @@ use warnings;
 
 use utf8;
 use File::Spec;
+use String::ShellQuote;
+use Capture::Tiny ':all';
+use Text::Xslate;
+use POSIX;
 
 use ZChat::Core;
 use ZChat::Config;
@@ -19,6 +23,7 @@ use ZChat::SystemPrompt;
 our $VERSION = '1.1.0';
 
 my $def_thought_re = qr{(?:<think>)?.*?<\/think>\s*}s;
+my $bin_persona = 'persona';
 
 sub new {
     my ($class, %opts) = @_;
@@ -207,16 +212,119 @@ sub _resolve_system_file {
     die "system-file not found: '$path' (searched: $roots_str)\n";
 }
 
+# sub _BAD_REMOVE_ME_resolve_persona_path {
+#     my ($self, $name) = @_;
+#     my @cmd = ($bin_persona, '--path', 'find', $name);
+#     my $cmd = shell_quote(@cmd);
+#     sel 1, "RESOLVE system prompt -- ATTEMPT with persona. Cmd: `$cmd`";
+#     my $path = `$cmd`;
+#     chomp $path if defined $path;
+#     die "persona '$name' not found (command: $cmd)\n" unless defined $path && $path ne '' && -f $path;
+#     return $path;
+# }
+
 sub _resolve_persona_path {
     my ($self, $name) = @_;
-    my @cmd = qw(persona --path find), $name;
-    my $cmd = shell_quote(@cmd);
-    sel 1, "RESOLVE system prompt -- ATTEMPT with persona. Cmd: `$cmd`";
-    my $path = `$cmd`;
-    chomp $path if defined $path;
-    die "persona '$name' not found (command: $cmd)\n" unless defined $path && $path ne '' && -f $path;
-    return $path;
+    my $msgpfx = "RESOLVE system prompt -- 'persona'";
+    
+    unless (defined $bin_persona) {
+    	sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
+        return undef;
+    }
+    
+    my @cmd = ($bin_persona, '--path', 'find', $name);
+    my $cmd_str = shell_quote(@cmd);
+    sel(1, "$msgpfx -- Executing cmd: `$cmd_str`");
+    
+    my ($stdout, $stderr, $exit) = capture { system(@cmd); };
+    
+    if ($exit != 0) {
+        my $msg = "$msgpfx -- Command failed (exit: $exit)";
+        $msg .= ": $stderr" if $stderr;
+        sel(1, $msg);
+        return undef;
+    }
+    chomp $stdout if defined $stdout;
+    sel(3, "$msgpfx => output: {{$stdout}}");
+    
+    # Check if command succeeded and found files
+    if (!defined $stdout || $stdout =~ /^\s*$/) {
+        my $msg = "$msgpfx returned no results for '$name'";
+        sel(1, $msg);
+        return undef;
+    }
+    
+    my @files = split /\n/, $stdout;
+    return undef unless @files;
+    
+    my $persona_file;
+    if (@files > 1) {
+		die "  REFUSING: Multiple persona files found for '$name':"
+			if ! $self->{_fallbacks_ok};
+        sel(1, "  Multiple persona files found for '$name':");
+        sel(2, "    $_") for @files;
+        sel(1, "  Using first: $files[0]");
+    } else {
+		sel(2, "$msgpfx -- file found: $files[0]");
+	}
+    
+	$persona_file = $files[0];
+    unless (-e $persona_file && -r $persona_file) {
+        my $msg = "$msgpfx -- Provided file not accessible: $persona_file";
+        sel(0, $msg);
+        die "$msg\n";
+    }
+    
+    my ($persona_name) = ($persona_file =~ m|/([^/]+)$|);
+    sel(2, "$msgpfx -- Persona name: $persona_name") if $persona_name;
+    
+    return $persona_file;
 }
+
+# sub trying_to_make_new_resolve_persona_path {
+#     my ($self, $name);
+#     if (!defined $bin_persona) {
+#     	sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
+#     	return undef;
+# 	}
+#     my @cmd = ($bin_persona, '--path', 'find', $name);
+#     my $cmd = shell_quote(@cmd);
+#     sel 1, "RESOLVE system prompt -- ATTEMPT with 'persona'. Cmd: `$cmd`";
+#     sel(1, "  Command: $cmd");
+#     my $paths;
+#     eval { $paths =`$cmd`; }; # No, let's use Capture::Tiny
+#     ..... you can ignore all the specifics of variable names and make it consistent with our current project code, message style, sel levels, etc. But clean it up and make it better. If we have access to 'fallbacks_ok' we should use the first line (the first persona path)!
+
+
+
+# 	chomp $paths if defined $paths;
+#     sel(1, "Loading Persona from disk with persona command");
+#     if ($? != 0) {
+#         sel(1, "'persona' bin ($bin_persona) wasn't found or command errored");
+#         return undef;
+
+#     }
+#     sel(3, "  persona provided:");
+#     sel(3, "    {{$output}}");
+#     # Check if command succeeded and found files
+#     return undef if !defined $output || $output eq '';
+#     my @files = split /\n/, $output;
+#     return undef unless @files;
+#     if (@files > 1) {
+#         sel(1, "Multiple persona files found for '$preset_name':");
+#         sel(1, "  $_") for @files;
+#         sel(1, "Using first: $files[0]");
+#     }
+#     my $persona_file = $files[0];
+#     return undef unless -e $persona_file && -r $persona_file;
+#     sel(1, "Preset (persona file) found: $persona_file");
+#     my ($persona_name) = $persona_file =~ m|/([^/]+)$|;
+#     sel(1, "Preset persona name: $persona_name");
+#     my $content = $self->_load_file_preset($persona_file);
+#     sel(2, "Preset persona content length: " . length($content)) if defined $content;
+#     return $content;
+# }
+
 
 sub _get_system_content {
     my ($self) = @_;
@@ -259,8 +367,6 @@ sub _get_system_content {
 
     # Render Xslate variables if present (no concatenation)
     if ($content) {
-        require Text::Xslate;
-        require POSIX;
         # Collect system pins as template vars
         my $sys_pins_ar = $self->{pin_mgr}->get_system_pins();
         my $pins_str    = join("\n", @$sys_pins_ar);

@@ -2,6 +2,7 @@
 
 # Optional: persona l
 cmd_personas=(persona l)
+dir_sessions_user=~/.config/zchat/sessions
 
 # Fallback mini initializer if bash-completion isn't present
 __z_init_completion_fallback() {
@@ -143,7 +144,7 @@ _z() {
   compopt -o nospace 2>/dev/null
   compopt -o filenames 2>/dev/null
 
-  __complete_presets() {
+  __complete_systems() {
     local token="$1" prefix="" needle="$1"
     if [[ "$needle" == *=* ]]; then
       prefix="${needle%%=*}="
@@ -161,17 +162,28 @@ _z() {
     done
   }
 
+  __complete_sessions() {
+    local -a names
+    mapfile -t names < <(cd "$dir_sessions_user" && find . -type d | grep -v '^\.$' | sed -e 's#^./##')
+    COMPREPLY=("${names[@]}")
+  }
+
   case "$prev" in
     --sys|--system|--system-persona|--preset|-t|--tasktype)
       COMPREPLY=()
-      __complete_presets "$cur"
+      __complete_systems "$cur"
+      return 0
+      ;;
+    --session|-n)
+      COMPREPLY=()
+      __complete_sessions "$cur"
       return 0
       ;;
   esac
 
   if [[ "$cur" == --preset=* || "$cur" == --tasktype=* || "$cur" == -p* || "$cur" == -t* ]]; then
     COMPREPLY=()
-    __complete_presets "$cur"
+    __complete_systems "$cur"
     return 0
   fi
 

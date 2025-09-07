@@ -77,12 +77,12 @@ sub json_pretty_from_data_min($data) {
     my $indent = 0;
     my $result = '';
     my $in_string = 0;
-    
+
     for my $char (split //, $json) {
         if ($char eq '"' && ($result !~ /\\$/)) {
             $in_string = !$in_string;
         }
-        
+
         if (!$in_string) {
             if ($char eq '{' || $char eq '[') {
                 $result .= $char . "\n" . ("  " x ++$indent);
@@ -112,17 +112,17 @@ sub json_pretty_from_data_min($data) {
 
 sub read_json_file {
     my ($filepath) = @_;
-    
+
     return [] unless -e $filepath;
-    
+
     my $result = [];
     eval {
         my $raw_content = read_binary($filepath);
         my $decoded = decode('UTF-8', $raw_content, Encode::FB_QUIET);
-        
+
         # Handle trailing commas (lenient parsing)
         $decoded =~ s/,\s*(\]|\})/$1/g;
-        
+
         if ($decoded =~ /^\s*$/) {
             $result = [];
         } else {
@@ -131,7 +131,7 @@ sub read_json_file {
             $result = ref($parsed) eq 'ARRAY' ? $parsed : [];
         }
     };
-    
+
     if ($@) {
         warn "Failed to load JSON file '$filepath': $@";
         return [];
@@ -140,7 +140,8 @@ sub read_json_file {
     return $result;
 }
 
-sub write_json_file($filepath, $data, $optshr={}) {
+sub write_json_file($filepath, $data, $optshr=undef) {
+    $optshr ||= {};
 	# Important: Defaults to makepath=>1
 	# (filepath, data, {options})
 	# options
@@ -154,27 +155,27 @@ sub write_json_file($filepath, $data, $optshr={}) {
     my $pretty = $optshr->{pretty} // 0;
     my $prettymin = $optshr->{prettymin} // $optshr->{min} // 0; # Reduce indent
     my $makepath = $optshr->{makepath} // 0;
-    
+
     # Ensure directory exists
     my $dir = (File::Spec->splitpath($filepath))[1];
     make_path($dir) if $makepath && $dir && !-d $dir;
-    
+
     my $old_umask;
     $old_umask = umask($umask) if defined $umask; # Set only if set
-    
+
     eval {
         my $json = JSON::XS->new->pretty(1)->utf8->space_after;
         my $json_text = $json->encode($data);
         write_text($filepath, $json_text);
     };
-    
+
     umask($old_umask) if defined $umask; # Revert only if set
-    
+
     if ($@) {
         warn "Failed to save JSON file '$filepath': $@";
         return 0;
     }
-    
+
     return 1;
 }
 
@@ -193,7 +194,8 @@ sub read_file {
     $content;
 }
 
-sub write_file($filepath, $content, $optshr={}) {
+sub write_file($filepath, $content, $optshr=undef) {
+    $optshr ||= {};
 	# Important: Defaults to makepath=>1
 	# options:
 	#    umask set your own umask. default is probably 0177;
@@ -201,25 +203,25 @@ sub write_file($filepath, $content, $optshr={}) {
 	#    makepath=>0 to disable make_path()
     my $umask = exists($optshr->{umask}) ? $optshr->{umask} : 0177;
     my $makepath = $optshr->{makepath} // 1;
-    
+
     # Ensure directory exists
     my $dir = (File::Spec->splitpath($filepath))[1];
     make_path($dir) if $makepath && $dir && !-d $dir;
-    
+
     my $old_umask;
     $old_umask = umask($umask) if defined $umask; # Set only if set
-    
+
     eval {
         write_text($filepath, $content);
     };
-    
+
     umask($old_umask) if defined $umask; # Revert only if set
-    
+
     if ($@) {
         warn "Error writing file: '$filepath': $@";
         return 0;
     }
-    
+
     return 1;
 }
 

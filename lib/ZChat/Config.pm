@@ -13,39 +13,39 @@ use ZChat::Utils ':all';
 
 sub new {
     my ($class, %opts) = @_;
-    
+
     my $self = {
         storage => ($opts{storage} // die "storage required"),
         session_name => ($opts{session_name} // ''),
         effective_config => {},
         _session_config_cache => undef,  # Cache to avoid redundant loads
     };
-    
+
     bless $self, $class;
     return $self;
 }
 
 sub load_effective_config {
     my ($self, %cli_opts) = @_;
-    
+
     my $config = {};
-    
+
     # 1. System defaults
     my $system_defaults = $self->_get_system_defaults();
     %$config = (%$config, %$system_defaults);
-    
+
     # 2. User global config
     my $user_config = $self->_load_user_config();
     if ($user_config) {
         %$config = (%$config, %$user_config);
         sel(2, "Loaded user config overrides");
     }
-    
-    # 3. Session config  
+
+    # 3. Session config
     my $effective_session = $self->_resolve_session_name(\%cli_opts, $config);
     $config->{session} = $effective_session;
     sel(2, "Using session '$effective_session'");
-    
+
     my $session_config;
     if ($effective_session) {
         $self->{session_name} = $effective_session;
@@ -61,7 +61,7 @@ sub load_effective_config {
     $config->{system_prompt_user}     = $user_config->{system_prompt}     if $user_config && defined $user_config->{system_prompt};
     $config->{system_persona_user}    = $user_config->{system_persona}    if $user_config && defined $user_config->{system_persona};
     $config->{system_user}            = $user_config->{system}            if $user_config && defined $user_config->{system};
-    
+
     if ($session_config) {
         $config->{system_file_session}    = $session_config->{system_file}    if defined $session_config->{system_file};
         $config->{system_prompt_session}  = $session_config->{system_prompt}  if defined $session_config->{system_prompt};
@@ -93,16 +93,16 @@ sub load_effective_config {
 
 sub _resolve_session_name {
     my ($self, $cli_opts, $config) = @_;
-    
+
     # CLI session takes precedence
     return $cli_opts->{session} if defined $cli_opts->{session} && $cli_opts->{session} ne '';
-    
+
     # Then original session_name from constructor
     return $self->{session_name} if defined $self->{session_name} && $self->{session_name} ne '';
-    
+
     # Then user config session
     return $config->{session} if defined $config->{session} && $config->{session} ne '';
-    
+
     # Finally default
     return 'default';
 }
@@ -134,7 +134,7 @@ sub _get_system_defaults {
 
 sub _load_user_config {
     my ($self) = @_;
-    
+
     my $config_dir = $self->_get_config_dir();
     my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
     sel 1, "Loading User config file: $user_config_file";
@@ -145,35 +145,35 @@ sub _load_user_config {
 
 sub _load_session_config {
     my ($self) = @_;
-    
+
     return undef unless $self->{session_name};
-    
+
     # Return cached version if available
     return $self->{_session_config_cache} if defined $self->{_session_config_cache};
-    
+
     my $session_dir = $self->_get_session_dir();
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
     sel 1, "Loading Session config file: $session_config_file";
     my $yaml = $self->{storage}->load_yaml($session_config_file);
     sel 3, "  YAML result: ", ($yaml // 'unable to load');
-    
+
     # Cache the result
     $self->{_session_config_cache} = $yaml;
-    
+
     return $yaml;
 }
 
 sub store_user_config {
     my ($self, %opts) = @_;
-    
+
     my $config_dir = $self->_get_config_dir();
     make_path($config_dir) unless -d $config_dir;
-    
+
     my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
-    
+
     # Load existing config
     my $existing = $self->_load_user_config() || {};
-    
+
     for my $key (qw(session system_prompt system_file system_persona system pin_sys_mode)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
@@ -182,25 +182,25 @@ sub store_user_config {
     if (defined $opts{pin_shims}) {
         $existing->{pin_shims} = $opts{pin_shims};
     }
-    
+
     sel 1, "Saving user config as YAML at: $user_config_file";
     return $self->{storage}->save_yaml($user_config_file, $existing);
 }
 
 sub store_session_config {
     my ($self, %opts) = @_;
-    
+
     my $session_dir = $self->{storage}->get_session_dir($self->{session_name});
     make_path($session_dir) unless -d $session_dir;
-    
+
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
-    
+
     # Use cached session config if available, otherwise load it
     my $existing = $self->{_session_config_cache} || $self->_load_session_config() || {};
-    
+
     # Add created timestamp if new
     $existing->{created} = time() unless exists $existing->{created};
-    
+
     # Update with new values
     for my $key (qw(system_prompt system_file system_persona system pin_sys_mode)) {
         if (defined $opts{$key}) {
@@ -211,29 +211,29 @@ sub store_session_config {
     if (defined $opts{pin_shims}) {
         $existing->{pin_shims} = $opts{pin_shims};
     }
-    
+
     # Update cache with new values
     $self->{_session_config_cache} = $existing;
-    
+
     sel 1, "Saving session config as YAML at: $session_config_file";
     return $self->{storage}->save_yaml($session_config_file, $existing);
 }
 
 sub _get_config_dir {
     my ($self) = @_;
-    
+
     my $home = $ENV{HOME} || die "HOME environment variable not set";
     return File::Spec->catdir($home, '.config', 'zchat');
 }
 
 sub _get_session_dir {
     my ($self) = @_;
-    
+
     return undef unless $self->{session_name};
-    
+
     my $config_dir = $self->_get_config_dir();
     my @session_parts = split('/', $self->{session_name});
-    
+
     return File::Spec->catdir($config_dir, 'sessions', @session_parts);
 }
 
@@ -349,17 +349,17 @@ ZChat::Config - Configuration management with precedence chain
 =head1 SYNOPSIS
 
     use ZChat::Config;
-    
+
     my $config = ZChat::Config->new(
         storage => $storage,
         session_name => "myproject/analysis"
     );
-    
+
     # Load effective configuration (system → user → session → CLI)
     my $effective = $config->load_effective_config(
        ??
     );
-    
+
     # Store configurations
     $config->store_user_config(preset => "default");
     $config->store_session_config(preset => "coding");

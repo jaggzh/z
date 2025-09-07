@@ -27,7 +27,7 @@ my $bin_persona = 'persona';
 
 sub new {
     my ($class, %opts) = @_;
-    
+
     my $self = {
         session_name => ($opts{session} // ''),
         system       => $opts{system},
@@ -44,9 +44,9 @@ sub new {
         _print_target    => undef,   # undef (silent) | *FH
         _on_chunk        => undef,   # optional streaming callback
     };
-    
+
     bless $self, $class;
-    
+
     $self->{storage} = ZChat::Storage->new();
     $self->{config}  = ZChat::Config->new(
         storage => $self->{storage},
@@ -73,7 +73,7 @@ sub new {
     );
 
     $self->{core} = ZChat::Core->new();
-    
+
     return $self;
 }
 
@@ -109,7 +109,7 @@ sub new {
 
 sub _load_config {
     my ($self, %opts) = @_;
-    
+
     my $config = $self->{config}->load_effective_config(
         preset => $opts{preset},
         system_prompt => $opts{system_prompt},
@@ -119,10 +119,11 @@ sub _load_config {
     );
 }
 
-sub _build_messages($self, $user_input, $opts={}) {
-    
+sub _build_messages($self, $user_input, $opts=undef) {
+    $opts ||= {};
+
     my @messages;
-    
+
     # 1. System message from preset/config
     my $system_content = $self->_get_system_content();
     if ($system_content) {
@@ -135,20 +136,20 @@ sub _build_messages($self, $user_input, $opts={}) {
     } else {
         sel(2, "No system content found");
     }
-    
+
     # 2. Enforce pin limits then add pinned messages (with shims)
     my $limits = $self->{config}->get_pin_limits();
     $self->{pin_mgr}->enforce_pin_limits($limits);
     my $shims  = $self->{config}->get_pin_shims();
     my $pinned_messages = $self->{pin_mgr}->build_message_array_with_shims(
         $shims,
-        sys_mode => ($self->{config}->get_pin_sys_mode() // 'vars'),
+		{ sys_mode => ($self->{config}->get_pin_sys_mode() // 'vars') }
     );
     if (@$pinned_messages) {
         sel(2, "Adding " . @$pinned_messages . " pinned messages");
         push @messages, @$pinned_messages;
     }
-    
+
     # 3. Add conversation history
     my $history = $self->{storage}->load_history($self->{session_name});
     if ($history && @$history) {
@@ -157,16 +158,16 @@ sub _build_messages($self, $user_input, $opts={}) {
     } else {
         sel(2, "No conversation history found");
     }
-    
+
     # 4. Add current user input
     sel(2, "Adding user input: $user_input");
     push @messages, {
         role => 'user',
         content => $user_input
     };
-    
+
     sel(2, "Built message array with " . @messages . " total messages");
-    
+
     return \@messages;
 }
 
@@ -226,18 +227,18 @@ sub _resolve_system_file {
 sub _resolve_persona_path {
     my ($self, $name) = @_;
     my $msgpfx = "RESOLVE system prompt -- 'persona'";
-    
+
     unless (defined $bin_persona) {
     	sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
         return undef;
     }
-    
+
     my @cmd = ($bin_persona, '--path', 'find', $name);
     my $cmd_str = shell_quote(@cmd);
     sel(1, "$msgpfx -- Executing cmd: `$cmd_str`");
-    
+
     my ($stdout, $stderr, $exit) = capture { system(@cmd); };
-    
+
     if ($exit != 0) {
         my $msg = "$msgpfx -- Command failed (exit: $exit)";
         $msg .= ": $stderr" if $stderr;
@@ -246,17 +247,17 @@ sub _resolve_persona_path {
     }
     chomp $stdout if defined $stdout;
     sel(3, "$msgpfx => output: {{$stdout}}");
-    
+
     # Check if command succeeded and found files
     if (!defined $stdout || $stdout =~ /^\s*$/) {
         my $msg = "$msgpfx returned no results for '$name'";
         sel(1, $msg);
         return undef;
     }
-    
+
     my @files = split /\n/, $stdout;
     return undef unless @files;
-    
+
     my $persona_file;
     if (@files > 1) {
 		die "  REFUSING: Multiple persona files found for '$name':"
@@ -267,17 +268,17 @@ sub _resolve_persona_path {
     } else {
 		sel(2, "$msgpfx -- file found: $files[0]");
 	}
-    
+
 	$persona_file = $files[0];
     unless (-e $persona_file && -r $persona_file) {
         my $msg = "$msgpfx -- Provided file not accessible: $persona_file";
         sel(0, $msg);
         die "$msg\n";
     }
-    
+
     my ($persona_name) = ($persona_file =~ m|/([^/]+)$|);
     sel(2, "$msgpfx -- Persona name: $persona_name") if $persona_name;
-    
+
     return $persona_file;
 }
 
@@ -328,7 +329,7 @@ sub _resolve_persona_path {
 
 sub _get_system_content {
     my ($self) = @_;
-    
+
     my $resolved = $self->{system_prompt}->resolve();
 
     if (!$resolved) {
@@ -339,11 +340,11 @@ sub _get_system_content {
     my $source = $resolved->{source};
     my $value = $resolved->{value};
     my $provenance = $resolved->{provenance};
-    
+
     sel(1, sprintf "Selected system source: %s %s=%s", $provenance, $source, $value);
-    
+
     my $content;
-    
+
     if ($source eq 'file') {
         my $abs = $self->_resolve_system_file($value);
         sel(2, "Resolved system_file => $abs");
@@ -390,38 +391,38 @@ sub _get_system_content {
 
 sub _manage_context {
     my ($self, $messages, $max_tokens) = @_;
-    
+
     # Simple token estimation (improve this later)
     my $total_tokens = 0;
     for my $msg (@$messages) {
         $total_tokens += length($msg->{content}) / 3; # rough estimate
     }
-    
+
     # If under limit, return as-is
     return $messages if $total_tokens <= ($max_tokens * 0.8);
-    
+
     # Otherwise, truncate history (keep system + pins + recent messages)
     my @result;
     my $keep_recent = 10; # Keep last 10 messages
-    
+
     # Keep system message and pins
     for my $msg (@$messages) {
         if ($msg->{role} eq 'system' || $msg->{is_pinned}) {
             push @result, $msg;
         }
     }
-    
+
     # Add recent history
     my @non_system = grep { $_->{role} ne 'system' && !$_->{is_pinned} } @$messages;
     my $start_idx = @non_system > $keep_recent ? @non_system - $keep_recent : 0;
     push @result, @non_system[$start_idx..$#non_system];
-    
+
     return \@result;
 }
 
 # Pin management methods
-sub pin {
-    my ($self, $content, $opts) = @_;
+sub pin($self, $content, $opts=undef) {
+    $opts ||= {};
     return $self->{pin_mgr}->add_pin($content, $opts);
 }
 
@@ -468,14 +469,14 @@ sub system  { $_[0]{system_prompt} }
 
 sub set_thought {
     my ($self, %opts) = @_;
-    
+
     # Handle conflicts first
     if (defined $opts{mode} && defined $opts{pattern}) {
         if ($opts{mode} eq 'disabled' && $opts{pattern}) {
             die "Cannot disable thought filtering while also providing a pattern\n";
         }
     }
-    
+
     if (defined $opts{mode}) {
         if ($opts{mode} eq 'disabled') {
             $self->{_thought}{mode} = 'disabled';
@@ -513,16 +514,16 @@ sub set_thought {
             sel 1, "Thought filtering ENABLED with provided pattern";
         }
     }
-    
+
     return $self;
 }
 
 sub _auto_detect_thought_pattern {
     my ($self, $system_content) = @_;
-    
+
     return unless $self->{_thought}{mode} eq 'auto';
     return unless defined $system_content && length $system_content;
-    
+
     # Look for ==== z think <pattern>
     if ($system_content =~ /^==== *z *think\s+(.+)$/m) {
         my $pattern_str = $1;
@@ -545,7 +546,7 @@ sub _auto_detect_thought_pattern {
 
 sub _should_filter_thoughts {
     my ($self) = @_;
-    
+
     return 0 if $self->{_thought}{mode} eq 'disabled';
     return 1 if $self->{_thought}{mode} eq 'enabled' && defined $self->{_thought}{pattern};
     return 1 if $self->{_thought}{mode} eq 'auto' && defined $self->{_thought}{pattern};
@@ -554,37 +555,38 @@ sub _should_filter_thoughts {
 
 sub _should_stream {
     my ($self, $opts) = @_;
-    
+
     # If user explicitly requests no streaming, honor it
     return 0 if defined $opts->{stream} && !$opts->{stream};
-    
+
     # If thought filtering is active, force non-streaming so regex can work on complete text
     return 0 if $self->_should_filter_thoughts();
-    
+
     # Default to streaming
     return 1;
 }
 
 sub _apply_thought_filter {
     my ($self, $text) = @_;
-    
+
     return $text unless $self->_should_filter_thoughts();
-    
+
     my $pattern = $self->{_thought}{pattern};
     return $text unless defined $pattern;
-    
+
     my $original_length = length($text);
     $text =~ s/$pattern//gs;
     my $filtered_length = length($text);
-    
+
     if ($original_length != $filtered_length) {
         sel 2, "Filtered " . ($original_length - $filtered_length) . " characters of reasoning content";
     }
-    
+
     return $text;
 }
 
-sub query($self, $user_text, $opts={}) {
+sub query($self, $user_text, $opts=undef) {
+    $opts ||= {};
     my $print_fh;
     if (exists $opts->{print}) {
 		$print_fh = _validate_print_opt($opts->{print});
@@ -601,7 +603,7 @@ sub query($self, $user_text, $opts={}) {
 
     # Decide streaming based on thought filtering
     my $should_stream = $self->_should_stream($opts);
-    
+
     if (!$should_stream && $self->_should_filter_thoughts()) {
         sel 2, "Forcing non-streaming mode for thought pattern filtering";
     }
@@ -617,7 +619,7 @@ sub query($self, $user_text, $opts={}) {
     }
 
     my $raw_response = '';
-    
+
     if ($should_stream) {
         my $cb = sub ($piece) {
             $raw_response .= $piece;
@@ -627,20 +629,20 @@ sub query($self, $user_text, $opts={}) {
                 print $print_fh $piece;
             }
         };
-        $self->{core}->complete_request(\@messages, { 
+        $self->{core}->complete_request(\@messages, {
             stream => 1,
-            on_chunk => $cb, 
-            fallbacks_ok => $self->{_fallbacks_ok} 
+            on_chunk => $cb,
+            fallbacks_ok => $self->{_fallbacks_ok}
         });
     } else {
-        $raw_response = $self->{core}->complete_request(\@messages, { 
+        $raw_response = $self->{core}->complete_request(\@messages, {
             stream => 0,
-            fallbacks_ok => $self->{_fallbacks_ok} 
+            fallbacks_ok => $self->{_fallbacks_ok}
         });
-        
+
         # Apply thought filtering to complete response
         my $filtered_response = $self->_apply_thought_filter($raw_response);
-        
+
         # Output the filtered result
         if ($print_fh && !$on_chunk) {
             print $print_fh $filtered_response;
@@ -648,7 +650,7 @@ sub query($self, $user_text, $opts={}) {
         if ($on_chunk) {
             $on_chunk->($filtered_response);
         }
-        
+
         # Use filtered version for return and storage
         $raw_response = $filtered_response;
     }
@@ -742,29 +744,29 @@ ZChat - Perl interface to LLM chat completions with session management
 =head1 SYNOPSIS
 
     use ZChat;
-    
+
     # Simple usage
     my $z = ZChat->new();
     my $response = $z->complete_request("Hello, how are you?");
-    
+
     # With session and preset
     my $z = ZChat->new(
-        session => "myproject/analysis", 
+        session => "myproject/analysis",
         preset => "helpful-assistant"
     );
-    
+
     # Pin management
     $z->pin("You are an expert in Perl programming.");
     $z->pin("Use code blocks for examples.", role => 'user');
     my $pins = $z->list_pins();
-    
+
     # Configuration storage
     $z->store_user_config(preset => "default");
     $z->store_session_config(preset => "coding-assistant");
 
 =head1 DESCRIPTION
 
-ZChat provides a clean interface to LLM APIs with session management, 
+ZChat provides a clean interface to LLM APIs with session management,
 conversation history, pinned messages, and preset system prompts.
 
 =cut

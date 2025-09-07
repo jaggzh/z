@@ -340,7 +340,7 @@ if ($opt->tokens_full) {
     my $input_text = $uprompt // '';
     die "${bred}No input text provided$rst\n" if $input_text eq '';
     
-    my @tokens = $zchat->{core}->tokenize($input_text, with_pieces => 1);
+    my @tokens = $zchat->{core}->tokenize($input_text, { with_pieces => 1 });
     my $json = JSON::XS->new->utf8->canonical(1)->encode(\@tokens);
     say $json;
     exit;
@@ -427,9 +427,10 @@ if ($opt->pin_write) {
         if ($index < @$pins) {
             $zchat->remove_pin($index);
             # For simplicity, just add new pin (order might change)
-            $zchat->pin($new_content, 
+            $zchat->pin($new_content, {
                 role => $pins->[$index]{role},
-                method => $pins->[$index]{method}
+                method => $pins->[$index]{method},
+              }
             );
             sel 1, "Pin $index updated.";
         } else {
@@ -456,35 +457,44 @@ if ($opt->pin_file) {
         my $items = load_pipes_file($pin_file);   # ARRAY of hashes/UA pairs
         for my $it (@$items) {
             if (ref($it) eq 'HASH' && exists $it->{role} && exists $it->{content}) {
-                $zchat->pin($it->{content}, role => $it->{role}, method => ($it->{method}//'msg'));
+                $zchat->pin($it->{content}, {
+                    role => $it->{role},
+                    method => ($it->{method}//'msg'),
+                });
             } else {
                 # Treat as UA pair (pipes reader yields {user,assistant})
-                $zchat->pin($it->{user}, role=>'user', method=>'msg')           if defined $it->{user} && $it->{user} ne '';
-                $zchat->pin($it->{assistant}, role=>'assistant', method=>'msg') if defined $it->{assistant} && $it->{assistant} ne '';
+                $zchat->pin($it->{user}, {
+                    role=>'user',
+                    method=>'msg',
+                }) if defined $it->{user} && $it->{user} ne '';
+                $zchat->pin($it->{assistant}, {
+                    role=>'assistant',
+                    method=>'msg',
+                }) if defined $it->{assistant} && $it->{assistant} ne '';
             }
         }
     }
 }
 
 # Direct role-specific pins
-for my $s (@{ $opt->pin_sys  // [] }) { $zchat->pin($s, role=>'system',    method=>'concat'); }
-for my $s (@{ $opt->pin_user // [] }) { $zchat->pin($s, role=>'user',      method=>'msg');    }
-for my $s (@{ $opt->pin_ast  // [] }) { $zchat->pin($s, role=>'assistant', method=>'msg');    }
+for my $s (@{ $opt->pin_sys  // [] }) { $zchat->pin($s, { role=>'system',    method=>'concat' }) ; }
+for my $s (@{ $opt->pin_user // [] }) { $zchat->pin($s, { role=>'user',      method=>'msg' }) ;    }
+for my $s (@{ $opt->pin_ast  // [] }) { $zchat->pin($s, { role=>'assistant', method=>'msg' }) ;    }
 
 # UA pipe: "user|||assistant"
 for my $pair (@{ $opt->pin_ua_pipe // [] }) {
     my ($u,$a) = split(/\|\|\|/, $pair, 2);
     $u = '' unless defined $u; $a = '' unless defined $a;
-    $zchat->pin($u, role=>'user', method=>'msg')           if length $u;
-    $zchat->pin($a, role=>'assistant', method=>'msg')      if length $a;
+    $zchat->pin($u, { role=>'user', method=>'msg' })           if length $u;
+    $zchat->pin($a, { role=>'assistant', method=>'msg' })      if length $a;
 }
 
 # UA JSON: {"user":"...","assistant":"..."}
 for my $json (@{ $opt->pin_ua_json // [] }) {
     my $obj = eval { JSON::XS->new->decode($json) } // {};
     if (ref($obj) eq 'HASH') {
-        $zchat->pin($obj->{user}, role=>'user', method=>'msg')             if defined $obj->{user} && $obj->{user} ne '';
-        $zchat->pin($obj->{assistant}, role=>'assistant', method=>'msg')   if defined $obj->{assistant} && $obj->{assistant} ne '';
+        $zchat->pin($obj->{user}, { role=>'user', method=>'msg' })             if defined $obj->{user} && $obj->{user} ne '';
+        $zchat->pin($obj->{assistant}, { role=>'assistant', method=>'msg' })   if defined $obj->{assistant} && $obj->{assistant} ne '';
     } else {
         warn "Ignoring invalid --pin-ua-json payload";
     }

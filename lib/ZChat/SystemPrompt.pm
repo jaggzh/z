@@ -19,42 +19,42 @@ sub new {
     return $self;
 }
 
-sub _scope {
-    my ($self, $opts) = @_;
+sub _scope($self, $opts=undef) {
+    $opts ||= {};
     return ($opts && $opts->{scope}) ? $opts->{scope} : 'CODE';
 }
 
-sub set {
-    my ($self, $name, $opts) = @_;
+sub set($self, $name, $opts=undef) {
+    $opts ||= {};
     die "set(): exactly one positional arg required" unless defined $name && @_ == 2 || (@_ == 3 && ref($opts) eq 'HASH');
     my $scope = $self->_scope($opts);
     $self->{config}->set_system_candidate($scope, file_or_persona => $name);
     return $self;
 }
 
-sub set_file {
-    my ($self, $path, $opts) = @_;
+sub set_file($self, $path, $opts=undef) {
+    $opts ||= {};
     my $scope = $self->_scope($opts);
     $self->{config}->set_system_candidate($scope, system_file => $path);
     return $self;
 }
 
-sub set_persona {
-    my ($self, $name, $opts) = @_;
+sub set_persona($self, $name, $opts=undef) {
+    $opts ||= {};
     my $scope = $self->_scope($opts);
     $self->{config}->set_system_candidate($scope, system_persona => $name);
     return $self;
 }
 
-sub set_str {
-    my ($self, $text, %opts) = @_;
-    my $scope = $self->_scope(\%opts);
+sub set_str($self, $text, $opts=undef) {
+    $opts ||= {};
+    my $scope = $self->_scope($opts);
     $self->{config}->set_system_candidate($scope, system_str => $text);
     return $self;
 }
 
-sub set_auto {
-    my ($self, $name, $opts) = @_;
+sub set_auto($self, $name, $opts=undef) {
+    $opts ||= {};
     my $scope = $self->_scope($opts);
     $self->{config}->set_system_candidate($scope, system => $name);
     return $self;

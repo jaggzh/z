@@ -16,7 +16,7 @@ sub new {
         storage      => ($opts{storage}      // die "storage required"),
         session_name => ($opts{session}      // die "session required"),
         mode         => ($opts{mode}         // 'rw'),   # rw | ro | none
-        _messages    => [],                              
+        _messages    => [],
         _loaded      => 0,
     };
     bless $self, $class;
@@ -93,7 +93,7 @@ sub _find_last_index_for_role {
 
 sub get_last {
     my ($self, %opts) = @_;
-    if (defined $opts{role}) {
+    if (exists $opts{role}) {
         my $idx = $self->_find_last_index_for_role($opts{role});
         return undef unless defined $idx;
         return $self->{_messages}[$idx];
@@ -103,8 +103,8 @@ sub get_last {
     return { user => $u, assistant => $a };
 }
 
-sub owrite_last {
-    my ($self, $payload, $opts) = @_;
+sub owrite_last($self, $payload, $opts=undef) {
+    $opts ||= {};
     if (ref($payload) eq 'HASH') {
         for my $role (qw(user assistant system)) {
             next unless exists $payload->{$role};
@@ -118,7 +118,7 @@ sub owrite_last {
         }
         return $self;
     }
-    my $role = ($opts && $opts->{role}) // 'assistant';
+    my $role = $opts->{role} // 'assistant';
     my $idx  = $self->_find_last_index_for_role($role);
     if (defined $idx) {
         $self->{_messages}[$idx]{content} = $payload;

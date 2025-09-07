@@ -423,6 +423,7 @@ sub _manage_context {
 # Pin management methods
 sub pin($self, $content, $opts=undef) {
     $opts ||= {};
+    sel 3, "Z->pin(): Adding pin";
     return $self->{pin_mgr}->add_pin($content, $opts);
 }
 

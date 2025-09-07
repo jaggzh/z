@@ -474,61 +474,117 @@ if ($opt->pin_write) {
 
 # Add pins from CLI options
 if ($opt->pin) {
+    my $new_pin_cnt=0;
     for my $pin_content (@{$opt->pin}) {
         $zchat->pin($pin_content);
+        $new_pin_cnt++;
     }
+    sel 1, "--pin: Added $new_pin_cnt new pins";
+    $non_query_acts++;
 }
 
 if ($opt->pin_file) {
+    my $new_pin_cnt=0;
+    my $new_pin_files=0;
     for my $pin_file (@{$opt->pin_file}) {
         unless (-e $pin_file && -r $pin_file) {
             die "${bred}ERROR: Pin file not found or readable: $pin_file$rst\n";
         }
         my $items = load_pipes_file($pin_file);   # ARRAY of hashes/UA pairs
+        $new_pin_files++;
         for my $it (@$items) {
             if (ref($it) eq 'HASH' && exists $it->{role} && exists $it->{content}) {
                 $zchat->pin($it->{content}, {
                     role => $it->{role},
                     method => ($it->{method}//'msg'),
                 });
+                $new_pin_cnt++;
             } else {
                 # Treat as UA pair (pipes reader yields {user,assistant})
-                $zchat->pin($it->{user}, {
-                    role=>'user',
-                    method=>'msg',
-                }) if defined $it->{user} && $it->{user} ne '';
-                $zchat->pin($it->{assistant}, {
-                    role=>'assistant',
-                    method=>'msg',
-                }) if defined $it->{assistant} && $it->{assistant} ne '';
+                if (defined $it->{user} && $it->{user} ne '') {
+                    $zchat->pin($it->{user}, {
+                        role=>'user',
+                        method=>'msg',
+                    });
+                    $new_pin_cnt++;
+                };
+                if (defined $it->{assistant} && $it->{assistant} ne '') {
+                    $zchat->pin($it->{assistant}, {
+                        role=>'assistant',
+                        method=>'msg',
+                    });
+                    $new_pin_cnt++;
+                }
             }
         }
     }
+    sel 1, "--pin-file: Added $new_pin_cnt new pins from $new_pin_files files";
+    $non_query_acts++;
 }
 
 # Direct role-specific pins
-for my $s (@{ $opt->pin_sys  // [] }) { $zchat->pin($s, { role=>'system',    method=>'concat' }) ; }
-for my $s (@{ $opt->pin_user // [] }) { $zchat->pin($s, { role=>'user',      method=>'msg' }) ;    }
-for my $s (@{ $opt->pin_ast  // [] }) { $zchat->pin($s, { role=>'assistant', method=>'msg' }) ;    }
+my $new_pin_track=0;
+for my $s (@{ $opt->pin_sys  // [] }) {
+    $zchat->pin($s, { role=>'system', method=>'concat' } );
+    $new_pin_track++;
+    $non_query_acts++;
+}
+sel 1, "--pin-sys: Added $new_pin_track system pins (concat mode)" if $new_pin_track;
+
+$new_pin_track=0;
+for my $s (@{ $opt->pin_user // [] }) {
+    $zchat->pin($s, { role=>'user',   method=>'msg' } );
+    $new_pin_track++;
+    $non_query_acts++;
+}
+sel 1, "--pin-user: Added $new_pin_track user pins (msg mode)" if $new_pin_track;
+
+$new_pin_track=0;
+for my $s (@{ $opt->pin_ast  // [] }) {
+    $zchat->pin($s, { role=>'assistant', method=>'msg' } );
+    $new_pin_track++;
+    $non_query_acts++;
+}
+sel 1, "--pin-ast: Added $new_pin_track assistant pins (msg mode)" if $new_pin_track;
 
 # UA pipe: "user|||assistant"
+$new_pin_track=0;
 for my $pair (@{ $opt->pin_ua_pipe // [] }) {
+    my $new_pin_cnt=0;
     my ($u,$a) = split(/\|\|\|/, $pair, 2);
     $u = '' unless defined $u; $a = '' unless defined $a;
-    $zchat->pin($u, { role=>'user', method=>'msg' })           if length $u;
-    $zchat->pin($a, { role=>'assistant', method=>'msg' })      if length $a;
+    if (length $u) {
+        $zchat->pin($u, { role=>'user', method=>'msg' });
+        $new_pin_track++;
+        sel 2, "--pin-ua-pipe: Adding user pin (msg mode)";
+    if (length $a) {
+        $zchat->pin($a, { role=>'assistant', method=>'msg' });
+        $new_pin_track++;
+        sel 2, "--pin-ua-pipe: Adding assistant pin (msg mode)";
+    }
+    $non_query_acts++;
 }
+sel 1, "--pin-ua-pipe: Added $new_pin_track user/assistant pins." if $new_pin_track;
 
 # UA JSON: {"user":"...","assistant":"..."}
+$new_pin_track=0;
 for my $json (@{ $opt->pin_ua_json // [] }) {
     my $obj = eval { JSON::XS->new->decode($json) } // {};
     if (ref($obj) eq 'HASH') {
-        $zchat->pin($obj->{user}, { role=>'user', method=>'msg' })             if defined $obj->{user} && $obj->{user} ne '';
-        $zchat->pin($obj->{assistant}, { role=>'assistant', method=>'msg' })   if defined $obj->{assistant} && $obj->{assistant} ne '';
+        if (defined $obj->{user} && $obj->{user} ne '') {
+            $zchat->pin($obj->{user}, { role=>'user', method=>'msg' });
+            $new_pin_track++;
+        }
+        if (defined $obj->{assistant} && $obj->{assistant} ne '') {
+            $zchat->pin($obj->{assistant}, { role=>'assistant', method=>'msg' });
+            $new_pin_track++;
+        }
     } else {
         warn "Ignoring invalid --pin-ua-json payload";
     }
+    $non_query_acts++;
 }
+sel 1, "--pin-ua-json: Added $new_pin_track user/assistant pins." if $new_pin_track;
 
 # History management
 if ($opt->wipe) {
@@ -541,7 +597,7 @@ if ($opt->wipe) {
     } else {
         # Already wiped earlier.
     }
-    # exit unless defined $uprompt; # Other options might still be functioning even if wipe was done (like storing settings), so don't exit.
+    # exit unless defined $uprompt; # Other options might still be requested
 }
 
 # Storage operations (These come BEFORE being blocked by edit history)
@@ -558,7 +614,8 @@ if ($opt->store_user) {
 
     $zchat->store_user_config(%store_opts);
     sel(1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } sort keys %store_opts)) if %store_opts;
-    exit unless defined $uprompt;
+    # exit unless defined $uprompt;
+    $non_query_acts++;
 }
 
 if ($opt->store_session) {
@@ -573,7 +630,8 @@ if ($opt->store_session) {
 
     $zchat->store_session_config(%store_opts);
     say "Stored session config: " . join(", ", sort keys %store_opts) if %store_opts;
-    exit unless defined $uprompt;
+    $non_query_acts++;
+    # exit unless defined $uprompt;
 }
 
 # Overwrite last message for a specific role (does not affect pins)
@@ -601,7 +659,7 @@ if (my $role_to_overwrite = $opt->owrite_last) {
     }
     $zchat->{storage}->save_history($session_name, $messages);
     sel 1, "Successfully overwrote last '$role_to_overwrite' message in history.";
-    exit;
+    $non_query_acts++;
 }
 
 # Output last message content (to stdout or a file)
@@ -623,9 +681,11 @@ if (defined $opt->output_last) {
             or die "Error writing last message to '$path'\n";
         sel 1, "Wrote last message to $path";
     }
-    exit;
+    $non_query_acts++;
 }
 
+# Edit history: User will be in their EDITOR. We should have handled all
+# our actions writing data out before we get blocked in the editor run.
 if ($opt->edit_hist) {
     die "Input-only mode - editing makes no sense\n" if $opt->input_only;
     die "No-history mode - editing makes no sense\n" if $opt->no_history;
@@ -635,13 +695,18 @@ if ($opt->edit_hist) {
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
     
     system($editor, '--', $history_file);
+    sel 0, "Exiting after editing.";
     exit;
 }
 
 # Validate we have input for completion
 my $intmode = $opt->interactive;
 if (!$intmode && !defined $uprompt) {
-    die "${bred}No query provided. See -h or use -i for interactive mode.$rst\n";
+    if ($non_query_acts++) {
+        exit; # They performed some actions deliberately. Exit silently.
+    } else {
+        die "${bred}No query provided. See -h or use -i for interactive mode.$rst\n";
+    }
 }
 
 # Disable colors in non-interactive mode

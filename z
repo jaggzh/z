@@ -403,24 +403,20 @@ if ($opt->pin_clear) {
 
 if ($opt->pin_rm) {
     my @indices = @{$opt->pin_rm};
-    # Validate format "0=content" (empty allowed)
-    for my $i (0..$#indices) {
-        my ($u_pin_idx) = ($indices[$i] !~ /^\d+=/);
-        die "pin-rm value at pin-rm index $i: ('$indices[$i]') is an invalid format. Need '#=content'."
-            if !defined $u_pin_idx;
-        die "pin-rm value at pin-rm index $i: ('$indices[$i]'). Pin index ($u_pin_idx) doesn't exist."
-            if $u_pin_idx > $#indices;
-    }
+    
+    # Validate all indices first
+    my ($valid, $error) = $zchat->validate_pin_indices(@indices);
+    die "Pin removal validation failed: $error\n" unless $valid;
+    
     # Sort in reverse order to avoid index shifting
     @indices = sort { $b <=> $a } @indices;
     
     my $removed = 0;
     for my $index (@indices) {
-        my ($u_pin_idx) = ($indices[$i] !~ /^\d+=/); # Already validated
-        if ($zchat->remove_pin($u_pin_idx)) {
+        if ($zchat->remove_pin($index)) {
             $removed++;
         } else {
-            warn "Failed to remove pin at index $u_pin_idx";
+            warn "Failed to remove pin at index $index";
         }
     }
     sel 1, "Removed $removed pin(s).";
@@ -445,27 +441,34 @@ if ($opt->pins_clear_sys || $opt->pins_clear_user || $opt->pins_clear_ast) {
 }
 
 if ($opt->pin_write) {
-    # Format: --pin-write 0='new content'
-    if ($opt->pin_write =~ /^(\d+)=(.*)$/) {
-        my ($index, $new_content) = ($1, $2);
-        
-        # Remove old pin and add new one at same position
-        my $pins = $zchat->list_pins();
-        if ($index < @$pins) {
-            $zchat->remove_pin($index);
-            # For simplicity, just add new pin (order might change)
-            $zchat->pin($new_content, {
-                role => $pins->[$index]{role},
-                method => $pins->[$index]{method},
-              }
-            );
-            sel 1, "Pin $index updated.";
+    # Parse and validate all pin-write operations first
+    my @operations;
+    for my $write_spec (@{$opt->pin_write}) {
+        if ($write_spec =~ /^(-?\d+)=(.*)$/) {
+            push @operations, { index => $1, content => $2 };
         } else {
-            die "Pin index $index does not exist\n";
+            die "Invalid --pin-write format '$write_spec'. Use: --pin-write 'INDEX=content'\n";
         }
     } else {
         die "Invalid --pin-write format. Use: --pin-write '0=new content'\n";
     }
+    
+    # Validate all indices exist
+    my @indices = map { $_->{index} } @operations;
+    my ($valid, $error) = $zchat->validate_pin_indices(@indices);
+    die "Pin write validation failed: $error\n" unless $valid;
+    
+    # Perform all updates
+    my $updated = 0;
+    for my $op (@operations) {
+        if ($zchat->update_pin($op->{index}, $op->{content})) {
+            sel 1, "Updated pin $op->{index}";
+            $updated++;
+        } else {
+            warn "Failed to update pin at index $op->{index}";
+        }
+    }
+    sel 1, "Updated $updated pin(s).";
     $non_query_acts++;
 }
 

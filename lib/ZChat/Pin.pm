@@ -25,9 +25,7 @@ sub set_session_name { my ($self,$n)=@_; $self->{session_name}=$n; }
 
 sub _load_pins {
     my ($self) = @_;
-
     return if $self->{loaded};
-
     $self->{pins} = $self->{storage}->load_pins($self->{session_name});
     $self->{loaded} = 1;
 }
@@ -112,9 +110,50 @@ sub remove_pin {
     return $self->_save_pins();
 }
 
+sub update_pin {
+    my ($self, $index, $new_content, %opts) = @_;
+    
+    return 0 unless defined $index && defined $new_content;
+    
+    $self->_load_pins();
+    
+    # Handle negative indices
+    $index = @{$self->{pins}} + $index if $index < 0;
+    
+    # Validate index
+    return 0 if $index < 0 || $index >= @{$self->{pins}};
+    
+    # Update content and timestamp, preserve other fields
+    $self->{pins}[$index]{content} = $new_content;
+    $self->{pins}[$index]{timestamp} = time();
+    
+    # Allow role/method updates if specified
+    $self->{pins}[$index]{role} = $opts{role} if defined $opts{role};
+    $self->{pins}[$index]{method} = $opts{method} if defined $opts{method};
+    
+    return $self->_save_pins();
+}
+
+sub validate_pin_indices {
+    my ($self, @indices) = @_;
+    
+    $self->_load_pins();
+    my $pin_count = @{$self->{pins}};
+    
+    for my $index (@indices) {
+        # Handle negative indices
+        my $actual_index = $index < 0 ? $pin_count + $index : $index;
+        
+        if ($actual_index < 0 || $actual_index >= $pin_count) {
+            return (0, "Pin index $index is out of range (have $pin_count pins)");
+        }
+    }
+    
+    return (1, "All indices valid");
+}
+
 sub build_message_array {
     my ($self) = @_;
-
     $self->_load_pins();
 
     return [] unless @{$self->{pins}};
@@ -222,11 +261,8 @@ sub build_message_array_with_shims($self, $shims, $opts=undef) {
 
 sub get_pin_count {
     my ($self, $role) = @_;
-
     $self->_load_pins();
-
     return scalar @{$self->{pins}} unless defined $role;
-
     return scalar grep { $_->{role} eq $role } @{$self->{pins}};
 }
 
@@ -239,11 +275,8 @@ sub get_system_pins {
 
 sub get_pins_summary {
     my ($self, $max_length) = @_;
-
-    $max_length ||= 80;
-
+    $max_length ||= 100;
     $self->_load_pins();
-
     my @summaries;
 
     for my $i (0..$#{$self->{pins}}) {
@@ -282,9 +315,7 @@ sub _save_pins {
 # Validation helpers
 sub _validate_pin_limits {
     my ($self, $limits) = @_;
-
     return 1 unless $limits;
-
     $self->_load_pins();
 
     my %counts = (

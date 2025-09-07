@@ -99,6 +99,7 @@ __z_opts() {
 -E --edit-hist --eh
 --su --S --store-user
 --store-session --ss
+--store-ppid --sp
 --system --sys
 --system-file --sfile
 --system-string --sstr

@@ -34,6 +34,7 @@ sub new {
         system_prompt=> $opts{system_prompt},
         system_file  => $opts{system_file},
         pin_shims    => $opts{pin_shims},
+        override_ppid=> $opts{override_ppid},
         config       => undef,
         core         => undef,
         storage      => undef,
@@ -50,7 +51,8 @@ sub new {
     $self->{storage} = ZChat::Storage->new();
     $self->{config}  = ZChat::Config->new(
         storage => $self->{storage},
-        session_name => $self->{session_name}
+        session_name => $self->{session_name},
+        override_ppid => $self->{override_ppid},
     );
 
     # Load effective configuration
@@ -75,6 +77,11 @@ sub new {
     $self->{core} = ZChat::Core->new();
 
     return $self;
+}
+
+sub store_shell_config {
+    my ($self, %opts) = @_;
+    return $self->{config}->store_shell_config(%opts);
 }
 
 # sub switch_session {

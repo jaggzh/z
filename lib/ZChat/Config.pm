@@ -9,6 +9,7 @@ use utf8;
 use File::Spec;
 use Cwd qw(abs_path);
 use File::Path qw(make_path);
+use POSIX qw(getsid);
 use ZChat::Utils ':all';
 
 sub new {
@@ -17,8 +18,10 @@ sub new {
     my $self = {
         storage => ($opts{storage} // die "storage required"),
         session_name => ($opts{session_name} // ''),
+        override_ppid => $opts{override_ppid},
         effective_config => {},
         _session_config_cache => undef,  # Cache to avoid redundant loads
+        _shell_session_id => undef,      # Cache shell session ID
     };
 
     bless $self, $class;
@@ -41,7 +44,21 @@ sub load_effective_config {
         sel(2, "Loaded user config overrides");
     }
 
-    # 3. Session config
+    # 3. Environment variable override
+    my $env_session = $ENV{ZCHAT_SESSION};
+    if ($env_session) {
+        $config->{session} = $env_session;
+        sel(2, "Using ZCHAT_SESSION env: $env_session");
+    }
+
+    # 4. Shell session config (PPID-scoped)
+    my $shell_config = $self->_load_shell_config();
+    if ($shell_config) {
+        %$config = (%$config, %$shell_config);
+        sel(2, "Loaded shell session config overrides");
+    }
+
+    # 5. Session config
     my $effective_session = $self->_resolve_session_name(\%cli_opts, $config);
     $config->{session} = $effective_session;
     sel(2, "Using session '$effective_session'");
@@ -69,7 +86,7 @@ sub load_effective_config {
         $config->{system_session}         = $session_config->{system}         if defined $session_config->{system};
     }
 
-    # 4. CLI overrides (runtime only) — stash source-marked copies
+    # 6. CLI overrides (runtime only) — stash source-marked copies
     if (defined $cli_opts{system_str})  { $config->{system_prompt} = $cli_opts{system_str};  $config->{_cli_system_str}  = $cli_opts{system_str};  sel(2, "Setting system_str from CLI options"); }
     if (defined $cli_opts{system_file}) { $config->{system_file}   = $cli_opts{system_file}; $config->{_cli_system_file} = $cli_opts{system_file}; sel(2, "Setting system_file from CLI options"); }
     if (defined $cli_opts{system_persona}) { $config->{system_persona} = $cli_opts{system_persona}; $config->{_cli_system_persona} = $cli_opts{system_persona}; sel(2, "Setting system_persona from CLI options"); }
@@ -337,6 +354,61 @@ sub resolve_system_prompt {
     }
     return undef;
 }
+
+sub _get_shell_session_id {
+    my ($self) = @_;
+    
+    return $self->{_shell_session_id} if defined $self->{_shell_session_id};
+    
+    my $ppid = $self->{override_ppid} // getppid();
+    my $sid = POSIX::getsid($ppid) // $ppid; # Session ID fallback to PPID
+    
+    # Get process start time for uniqueness (Linux/proc)
+    my $start_time = 0;
+    if (open my $fh, '<', "/proc/$ppid/stat") {
+        my $stat_line = <$fh>;
+        if ($stat_line) {
+            my @fields = split /\s+/, $stat_line;
+            $start_time = $fields[21] // 0; # starttime field
+        }
+        close $fh;
+    }
+    
+    $self->{_shell_session_id} = "${ppid}-${sid}-${start_time}";
+    return $self->{_shell_session_id};
+}
+
+sub _get_shell_config_file {
+    my ($self) = @_;
+    
+    my $uid = $<;
+    my $session_id = $self->_get_shell_session_id();
+    my $temp_dir = "/tmp/zchat-$uid";
+    return File::Spec->catfile($temp_dir, "shell-${session_id}.yaml");
+}
+
+sub _load_shell_config {
+    my ($self) = @_;
+    
+    my $shell_config_file = $self->_get_shell_config_file();
+    sel 2, "Checking shell config: $shell_config_file";
+    return $self->{storage}->load_yaml($shell_config_file);
+}
+
+sub store_shell_config {
+    my ($self, %opts) = @_;
+    
+    my $shell_config_file = $self->_get_shell_config_file();
+    my $temp_dir = File::Spec->catdir(File::Spec->splitpath($shell_config_file))[1];
+    make_path($temp_dir) unless -d $temp_dir;
+    
+    # Only store session name for shell scope
+    my $config = { session => $opts{session} };
+    
+    sel 1, "Saving shell session config: $shell_config_file";
+    return $self->{storage}->save_yaml($shell_config_file, $config);
+}
+
 
 1;
 

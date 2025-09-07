@@ -343,7 +343,7 @@ if ($opt->token_count) {
         my $token_count = $zchat->{core}->count_tokens($input_text);
         say $token_count;
     }
-    exit;
+    $non_query_acts++;
 }
 
 if ($opt->tokens_full) {
@@ -353,13 +353,13 @@ if ($opt->tokens_full) {
     my @tokens = $zchat->{core}->tokenize($input_text, { with_pieces => 1 });
     my $json = JSON::XS->new->utf8->canonical(1)->encode(\@tokens);
     say $json;
-    exit;
+    $non_query_acts++;
 }
 
 if ($opt->ctx) {
     my $n_ctx = $zchat->{core}->get_n_ctx();
     say $n_ctx;
-    exit;
+    $non_query_acts++;
 }
 
 if ($opt->metadata) {
@@ -367,7 +367,7 @@ if ($opt->metadata) {
     for my $key (sort keys %$model_info) {
         say "$key -> $model_info->{$key}";
     }
-    exit;
+    $non_query_acts++;
 }
 
 # Pin management commands
@@ -379,7 +379,7 @@ if ($opt->pin_list) {
             say "$i: [$pin->{role}/$pin->{method}] $pin->{content}";
         }
     } else {
-        say "No pins found.";
+        say "pin-list: No pins found.";
     }
     exit;
 }
@@ -390,7 +390,7 @@ if ($opt->pin_sum) {
     if (@$summaries) {
         say $_ for @$summaries;
     } else {
-        say "No pins found.";
+        say "pin-sum: No pins found.";
     }
     exit;
 }
@@ -398,36 +398,49 @@ if ($opt->pin_sum) {
 if ($opt->pin_clear) {
     $zchat->clear_pins();
     sel 1, "All pins cleared.";
-    exit;
+    $non_query_acts++;
 }
 
 if ($opt->pin_rm) {
     my @indices = @{$opt->pin_rm};
     # Validate format "0=content" (empty allowed)
     for my $i (0..$#indices) {
-        die "pin-rm value at pin-rm index $i is invalid ('$indices[$i]')"
-            if $indices[$i] !~ /^\d+=/;
+        my ($u_pin_idx) = ($indices[$i] !~ /^\d+=/);
+        die "pin-rm value at pin-rm index $i: ('$indices[$i]') is an invalid format. Need '#=content'."
+            if !defined $u_pin_idx;
+        die "pin-rm value at pin-rm index $i: ('$indices[$i]'). Pin index ($u_pin_idx) doesn't exist."
+            if $u_pin_idx > $#indices;
     }
     # Sort in reverse order to avoid index shifting
     @indices = sort { $b <=> $a } @indices;
     
     my $removed = 0;
     for my $index (@indices) {
-        if ($zchat->remove_pin($index)) {
+        my ($u_pin_idx) = ($indices[$i] !~ /^\d+=/); # Already validated
+        if ($zchat->remove_pin($u_pin_idx)) {
             $removed++;
         } else {
-            warn "Failed to remove pin at index $index";
+            warn "Failed to remove pin at index $u_pin_idx";
         }
     }
     sel 1, "Removed $removed pin(s).";
-    exit;
+    $non_query_acts++;
 }
 
 if ($opt->pins_clear_sys || $opt->pins_clear_user || $opt->pins_clear_ast) {
     my $did = 0;
-    $did += $zchat->{pin_mgr}->clear_pins_by_role('system')    if $opt->pins_clear_sys;
-    $did += $zchat->{pin_mgr}->clear_pins_by_role('user')      if $opt->pins_clear_user;
-    $did += $zchat->{pin_mgr}->clear_pins_by_role('assistant') if $opt->pins_clear_ast;
+    if ($opt->pins_clear_sys) {
+        $did += $zchat->{pin_mgr}->clear_pins_by_role('system');
+        $non_query_acts++;
+    }
+    if ($opt->pins_clear_user) {
+        $did += $zchat->{pin_mgr}->clear_pins_by_role('user')
+        $non_query_acts++;
+    }
+    if ($opt->pins_clear_ast) {
+        $did += $zchat->{pin_mgr}->clear_pins_by_role('assistant')
+        $non_query_acts++;
+    }
     sel 1, "Cleared role-specific pins." if $did;
 }
 
@@ -453,7 +466,7 @@ if ($opt->pin_write) {
     } else {
         die "Invalid --pin-write format. Use: --pin-write '0=new content'\n";
     }
-    exit;
+    $non_query_acts++;
 }
 
 # Add pins from CLI options

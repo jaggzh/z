@@ -60,6 +60,7 @@ my @cmd_tts = ("voice-piper-interactive");
 my $verbose = 0;
 my $verbose_resp = 0;
 my $editor = $ENV{EDITOR} // 'vim';
+my $non_query_acts=0; # Non-query actions
 
 # Colors
 my $clr_user = a24bg(35,0,35). a24fg(230,255,255);
@@ -192,8 +193,10 @@ if (@ARGV) {
 if (defined $uprompt) {
     if ($opt->echo_delineated) {
         print "<echo>", $uprompt, ($uprompt !~ /\n$/ ? "\n" : ''), "</echo>\n";
+        $non_query_acts++;
     } elsif ($opt->echo1) {
         print $uprompt, ($uprompt !~ /\n$/ ? "\n" : '');
+        $non_query_acts++;
     }
 }
 
@@ -270,11 +273,18 @@ if ($opt->store_user || $opt->store_session) {
     $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
     $store_opts{system} = $opt->system if defined $opt->system;
     
-    if ($opt->store_user)   { $zchat->store_user_config(%store_opts) }
-    if ($opt->store_session){ $zchat->store_session_config(%store_opts) }
+    if ($opt->store_user)   {
+        $zchat->store_user_config(%store_opts);
+        $non_query_acts++;
+    }
+    if ($opt->store_session) {
+        $zchat->store_session_config(%store_opts);
+        $non_query_acts++;
+    }
     
-    # Exit early if no query provided
-    exit unless defined $uprompt || $opt->interactive;
+    # We still have wiping and other things that might need to be done. Don't exit
+    # # Exit early if no query provided
+    # exit unless defined $uprompt || $opt->interactive;
 } else {
     # Initialize ZChat
     $zchat = ZChat->new(
@@ -393,6 +403,11 @@ if ($opt->pin_clear) {
 
 if ($opt->pin_rm) {
     my @indices = @{$opt->pin_rm};
+    # Validate format "0=content" (empty allowed)
+    for my $i (0..$#indices) {
+        die "pin-rm value at pin-rm index $i is invalid ('$indices[$i]')"
+            if $indices[$i] !~ /^\d+=/;
+    }
     # Sort in reverse order to avoid index shifting
     @indices = sort { $b <=> $a } @indices;
     
@@ -414,7 +429,6 @@ if ($opt->pins_clear_sys || $opt->pins_clear_user || $opt->pins_clear_ast) {
     $did += $zchat->{pin_mgr}->clear_pins_by_role('user')      if $opt->pins_clear_user;
     $did += $zchat->{pin_mgr}->clear_pins_by_role('assistant') if $opt->pins_clear_ast;
     sel 1, "Cleared role-specific pins." if $did;
-    exit;
 }
 
 if ($opt->pin_write) {

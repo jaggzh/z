@@ -26,7 +26,7 @@ sub _scope($self, $opts=undef) {
 
 sub set($self, $name, $opts=undef) {
     $opts ||= {};
-    die "set(): exactly one positional arg required" unless defined $name && @_ == 2 || (@_ == 3 && ref($opts) eq 'HASH');
+    die "Error: Can only set(persona_name) or set(persona_name, {options})" if ref $opts ne 'HASH';
     my $scope = $self->_scope($opts);
     $self->{config}->set_system_candidate($scope, file_or_persona => $name);
     return $self;

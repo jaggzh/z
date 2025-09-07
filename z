@@ -430,11 +430,11 @@ if ($opt->pins_clear_sys || $opt->pins_clear_user || $opt->pins_clear_ast) {
         $non_query_acts++;
     }
     if ($opt->pins_clear_user) {
-        $did += $zchat->{pin_mgr}->clear_pins_by_role('user')
+        $did += $zchat->{pin_mgr}->clear_pins_by_role('user');
         $non_query_acts++;
     }
     if ($opt->pins_clear_ast) {
-        $did += $zchat->{pin_mgr}->clear_pins_by_role('assistant')
+        $did += $zchat->{pin_mgr}->clear_pins_by_role('assistant');
         $non_query_acts++;
     }
     sel 1, "Cleared role-specific pins." if $did;
@@ -449,8 +449,6 @@ if ($opt->pin_write) {
         } else {
             die "Invalid --pin-write format '$write_spec'. Use: --pin-write 'INDEX=content'\n";
         }
-    } else {
-        die "Invalid --pin-write format. Use: --pin-write '0=new content'\n";
     }
     
     # Validate all indices exist
@@ -646,18 +644,14 @@ if (my $role_to_overwrite = $opt->owrite_last) {
     die "--owrite-last must be one of: (u|user|a|assistant).\n"
         unless $role_to_overwrite =~ /^(user|assistant)$/;
 
-    my $session_name = $zchat->get_session_name();
-    my $messages = $zchat->{storage}->load_history($session_name);
-    die "Cannot --owrite-last: conversation history is empty.\n" unless @$messages;
-    die "Cannot --owrite-last: No '$role_to_overwrite' message found to overwrite.\n" unless grep { $_->{role} && $_->{role} eq $role_to_overwrite } @$messages;
-
-    for (my $i = $#$messages; $i >= 0; $i--) {
-        if ($messages->[$i]{role} && $messages->[$i]{role} eq $role_to_overwrite) {
-            $messages->[$i]{content} = $uprompt;
-            last;
-        }
-    }
-    $zchat->{storage}->save_history($session_name, $messages);
+    # Use cleaner API method
+    $zchat->history->load();
+    die "Cannot --owrite-last: conversation history is empty.\n" if $zchat->history->empty();
+    
+    my $last = $zchat->history->get_last(role => $role_to_overwrite);
+    die "Cannot --owrite-last: No '$role_to_overwrite' message found to overwrite.\n" unless $last;
+    
+    $zchat->history_owrite_last($uprompt, { role => $role_to_overwrite });
     sel 1, "Successfully overwrote last '$role_to_overwrite' message in history.";
     $non_query_acts++;
 }
@@ -666,23 +660,27 @@ if (my $role_to_overwrite = $opt->owrite_last) {
 if (defined $opt->output_last) {
     die "ERROR: Request for --output-last while also providing a query. We don't know how to resolve the mixed output. Aborting."
         if defined $uprompt;
-    my $session_name = $zchat->get_session_name();
-    my $messages = $zchat->{storage}->load_history($session_name);
-    die "Conversation history is empty; nothing to output.\n" unless @$messages;
-
-    my $last = $messages->[-1]{content} // '';
+    
+    $zchat->history->load();
+    die "Conversation history is empty; nothing to output.\n" if $zchat->history->empty();
+    
+    my $last = $zchat->history->get_last();
+    my $content = $last->{assistant} ? $last->{assistant}{content} : ($last->{user} ? $last->{user}{content} : '');
+    
     my $dest = $opt->output_last;
-
     if ($dest eq '-') {
-        print $last;
+        print $content;
     } else {
         my $path = ($dest =~ /^-(.+)$/) ? $1 : $dest;
-        write_file($path, $last, { umask=>0177, makepath=>1 })
+        write_file($path, $content, { umask=>0177, makepath=>1 })
             or die "Error writing last message to '$path'\n";
         sel 1, "Wrote last message to $path";
     }
     $non_query_acts++;
 }
+
+# Show session info
+sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . $zchat->get_session_name() . "$rst";
 
 # Edit history: User will be in their EDITOR. We should have handled all
 # our actions writing data out before we get blocked in the editor run.
@@ -713,37 +711,6 @@ if (!$intmode && !defined $uprompt) {
 if (!$intmode || $opt->no_color) {
     $clr_user = '';
     $clr_sys = '';
-}
-
-# Show session info
-sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . $zchat->get_session_name() . "$rst";
-
-# Overwrite-last (if requested to use current prompt)
-if (defined $opt->owrite_last && length($opt->owrite_last)) {
-    my $role = ($opt->owrite_last =~ /^(u|user)$/i) ? 'user'
-             : ($opt->owrite_last =~ /^(a|assistant)$/i) ? 'assistant'
-             : die "owrite-last expects u|user|a|assistant";
-    die "Invalid to both call --owrite-last and provide a query.\n"
-        if defined $uprompt;
-    sel 1, "Overwriting last message from role '$role'";
-    $zchat->history_owrite_last($uprompt, { role => $role });
-    exit;
-}
-
-# Output last message content helper
-if (defined $opt->output_last && length($opt->output_last)) {
-    die "Currently we consider it invalid to both --output-last AND provide a query.\n"
-		if defined $uprompt;
-    my $last = $zchat->history->get_last(role => 'assistant');
-    my $text = $last ? ($last->{content} // '') : '';
-    if ($opt->output_last eq '-') {
-        print $text;
-    } else {
-        my $path = $opt->output_last;
-        $path =~ s/^-//;
-        write_text($path, $text);
-    }
-    exit;
 }
 
 if (defined $uprompt && length $uprompt) {

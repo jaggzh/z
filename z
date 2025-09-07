@@ -555,6 +555,7 @@ for my $pair (@{ $opt->pin_ua_pipe // [] }) {
         $zchat->pin($u, { role=>'user', method=>'msg' });
         $new_pin_track++;
         sel 2, "--pin-ua-pipe: Adding user pin (msg mode)";
+    }
     if (length $a) {
         $zchat->pin($a, { role=>'assistant', method=>'msg' });
         $new_pin_track++;
@@ -583,6 +584,7 @@ for my $json (@{ $opt->pin_ua_json // [] }) {
     $non_query_acts++;
 }
 sel 1, "--pin-ua-json: Added $new_pin_track user/assistant pins." if $new_pin_track;
+$new_pin_track=0; # No more using it but reset for safety
 
 # History management
 if ($opt->wipe) {

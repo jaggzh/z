@@ -122,12 +122,13 @@ my ($opt, $usage) = describe_options(
     [ 'Message pinning:' ],
     [ 'help-pins',          "Show detailed help for pinning" ],
     [ 'pin=s@',             "Add pinned message(s)" ],
-    [ 'pin-file=s@',        "Add pinned message(s) from file(s)" ],
-    [ 'pin-list',           "List all pinned messages" ],
-    [ 'pin-sum',            "List pinned messages (one-line summary)" ],
+    [ 'pins-file=s@',       "Add pinned message(s) from file(s)" ],
+    [ 'pins-list',          "List all pinned messages (their lines will wrap)" ],
+    [ 'pins-sum',           "List pinned messages (one-line summary)" ],
+    [ 'pins-cnt',           "Output total count of all pins of all pin types" ],
     [ 'pin-sum-len=i',      "Max length for pin summary lines" ],
     [ 'pin-write=s',        "Overwrite pin by index: --pin-write '0=new content'" ],
-    [ 'pin-clear',          "Clear all pinned messages" ],
+    [ 'pins-clear',         "Clear all pinned messages" ],
     [ 'pin-rm=i@',          "Remove pin(s) by index" ],
     [ 'pins-sys-max=i',     "Max system pins", { default => $def_pin_max } ],
     [ 'pins-user-max=i',    "Max user pins", { default => $def_pin_max } ],
@@ -157,7 +158,7 @@ $verbose_resp = $opt->verbose_resp;
 if ($opt->help_pins) {
     my $help_path = File::Spec->catfile($FindBin::RealBin, 'help', 'pins.md');
     if (-e $help_path) { print read_text($help_path) }
-    else { say "No pins help found (expected $help_path)" }
+    else { say "No pins help found (expected file at $help_path)" }
     exit;
 }
 
@@ -383,7 +384,7 @@ if ($opt->metadata) {
 }
 
 # Pin management commands
-if ($opt->pin_list) {
+if ($opt->pins_list) {
     my $pins = $zchat->list_pins();
     if (@$pins) {
         for my $i (0..$#$pins) {
@@ -391,23 +392,29 @@ if ($opt->pin_list) {
             say "$i: [$pin->{role}/$pin->{method}] $pin->{content}";
         }
     } else {
-        say "pin-list: No pins found.";
+        sel 1, "pins-list: No pins found.";
     }
-    exit;
+    $non_query_acts++;
 }
 
-if ($opt->pin_sum) {
+if ($opt->pins_sum) {
     my $max_len = $opt->pin_sum_len // 80;
     my $summaries = $zchat->{pin_mgr}->get_pins_summary($max_len);
     if (@$summaries) {
         say $_ for @$summaries;
     } else {
-        say "pin-sum: No pins found.";
+        sel 1, "pins-sum: No pins found.";
     }
-    exit;
+    $non_query_acts++;
 }
 
-if ($opt->pin_clear) {
+if ($opt->pins_cnt) {
+    my $summaries = $zchat->list_pins();
+    say (scalar @$summaries);
+    $non_query_acts++;
+}
+
+if ($opt->pins_clear) {
     $zchat->clear_pins();
     sel 1, "All pins cleared.";
     $non_query_acts++;
@@ -493,15 +500,15 @@ if ($opt->pin) {
     $non_query_acts++;
 }
 
-if ($opt->pin_file) {
+if ($opt->pins_file) {
     my $new_pin_cnt=0;
-    my $new_pin_files=0;
-    for my $pin_file (@{$opt->pin_file}) {
-        unless (-e $pin_file && -r $pin_file) {
-            die "${bred}ERROR: Pin file not found or readable: $pin_file$rst\n";
+    my $new_pins_files=0;
+    for my $pins_file (@{$opt->pins_file}) {
+        unless (-e $pins_file && -r $pins_file) {
+            die "${bred}ERROR: Pin file not found or readable: $pins_file$rst\n";
         }
-        my $items = load_pipes_file($pin_file);   # ARRAY of hashes/UA pairs
-        $new_pin_files++;
+        my $items = load_pipes_file($pins_file);   # ARRAY of hashes/UA pairs
+        $new_pins_files++;
         for my $it (@$items) {
             if (ref($it) eq 'HASH' && exists $it->{role} && exists $it->{content}) {
                 $zchat->pin($it->{content}, {
@@ -528,7 +535,7 @@ if ($opt->pin_file) {
             }
         }
     }
-    sel 1, "--pin-file: Added $new_pin_cnt new pins from $new_pin_files files";
+    sel 1, "--pins-file: Added $new_pin_cnt new pins from $new_pins_files files";
     $non_query_acts++;
 }
 
@@ -808,9 +815,9 @@ z - Command-line interface to ZChat LLM system
     z -i
     
     # Pin management
-    z --pin "You are a helpful assistant" --pin-list
-    z --pin-sum
-    z --pin-clear
+    z --pin "You are a helpful assistant" --pins-list
+    z --pins-sum
+    z --pins-clear
     
     # Session management  
     z -n myproject/analysis "What should I focus on?"

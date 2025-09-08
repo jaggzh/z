@@ -12,6 +12,7 @@ use File::Path qw(make_path);
 use JSON::XS;
 use ZChat::ansi; # ANSI color vars: $red, $gre (green), $gra (gray); prefix b* for bright (e.g. $bgre), bg* for backgrounds (e.g. $bgred), and $rst to reset; 24-bit via a24fg(r,g,b)/a24bg(r,g,b)
 use Data::Dumper;
+use utf8;
 
 our @EXPORT_OK = qw(
 	set_verbose get_verbose
@@ -29,15 +30,29 @@ our @EXPORT_OK = qw(
 	split_pipestr
 	encode_pipestr_part
 	_decode_pipestring_part
+	sok swarn serr sultraerr
+	sokl swarnl serrl sultraerrl
 );
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
+    glyphs => [qw(sok swarn serr sultraerr)],
 );
 
 our $json_compact = JSON::XS->new->ascii->canonical; # For our custom json formatting
 our $verbose = $ENV{ZCHAT_VERBOSE} // 0;  # 0=quiet, 1,2,3...
+our $uc_ok = "✔";  # Unicode "Good/OK/Checkmark"
+our $uc_warn = "⚠";  # Unicode "Warning"
+our $uc_err = "✖";  # Unicode "Error/Times"
+our $uc_uerr = "⛔";  # Unicode "Ultra Error / No Entry"
 
 my $PIPE_DELIM_RE = qr/(?<!\\)(?:\\\\){,20}\K\|\|\|/;
+
+# Styles (24-bit color + attributes). Avoid 8-bit $b* colors; $rst remains OK.
+# Example given: strong red, bold+italic for errors.
+my $a_err      = a24fg(255,158,158) . $aa_boit;
+my $a_warn     = a24fg(255,210,64)  . $aa_bo;                        # vivid yellow, bold
+my $a_ok       = a24fg(144,238,144) . $aa_bo;                        # light green, bold
+my $a_ultraerr = a24bg(100,0,0)     . a24fg(255,255,255) . $aa_boit; # white on toned-down strong red
 
 sub set_verbose($l) { $verbose = $l // 0 }
 sub get_verbose { $verbose }
@@ -45,6 +60,17 @@ sub sel($lvl, @msg) { say STDERR @msg if $verbose >= $lvl }
 sub se(@msg) { say STDERR @msg; }
 sub pel($lvl, @msg) { print STDERR @msg if $verbose >= $lvl }
 sub pe(@msg) { print STDERR @msg }
+
+sub sok(@msg)      { se "$uc_ok $a_ok",       @msg, $rst; }
+sub swarn(@msg)    { se "$uc_warn $a_warn",   @msg, $rst; }
+sub serr(@msg)     { se "$uc_err $a_err",     @msg, $rst; }
+sub sultraerr(@msg){ se "$uc_uerr $a_ultraerr", @msg, $rst; }
+
+sub sokl($lvl, @msg)      { sok(@msg)      if $verbose >= $lvl }
+sub swarnl($lvl, @msg)    { swarn(@msg)    if $verbose >= $lvl }
+sub sultraerrl($lvl, @msg){ sultraerr(@msg)if $verbose >= $lvl }
+sub serrl($lvl, @msg)     { serr(@msg)     if $verbose >= $lvl }
+
 
 sub printcon(@msg) { # Force print to console
     if (open my $tty, '>>', '/dev/tty') {

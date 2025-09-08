@@ -7,7 +7,7 @@
 #    (Only the 256 color set is even basically touched, so far).
 # Notes:
 #  No value bounds are placed on anything.  Up to the caller for now.
-package ansi;
+package ZChat::ansi;
 
 #BEGIN { uncolor() if grep {/^(--no-ansi|--color=none)$/} @ARGV; }
 
@@ -23,6 +23,12 @@ our @codes = qw(
 	$rst $inv
 	$cll $cllr $cls $clsb
 	$ahome
+
+	$aa_ul $aa_dul $aa_curul $aa_dotul $aa_dashul
+	$aa_overl $aa_str $aa_inv
+	$aa_heavy $aa_bo $aa_it $aa_boit
+	$aar_ul $aar_dul $aar_curul $aar_dotul $aar_dashul
+	$aar_overl $aar_str $aar_inv $aar_heavy $aar_bo $aar_it $aar_boit
 );
 our @utils256 = qw(
 	fggray_5fl fggray_23
@@ -62,6 +68,33 @@ our $bcya="\033[36;1m"; our $whi="\033[37;1m";
 our $rst="\033[0m"; our $inv="\033[7m";
 our $cll="\033[2K"; our $cllr="\033[K"; our $cls="\033[2J"; our $clsb="\033[J";
 our $ahome = "\033[1H";
+
+# Attribute SGRs (AA = "ANSI Attribute"); AR = "Attribute Reset"
+# Underlines (xterm/VT): 4:<n>m forms; all reset with 24.
+our $aa_ul     = "\e[4m";      our $aar_ul     = "\e[24m";   # single underline
+our $aa_dul    = "\e[4:2m";    our $aar_dul    = "\e[24m";   # double underline
+our $aa_curul  = "\e[4:3m";    our $aar_curul  = "\e[24m";   # curly underline
+our $aa_dotul  = "\e[4:4m";    our $aar_dotul  = "\e[24m";   # dotted underline
+our $aa_dashul = "\e[4:5m";    our $aar_dashul = "\e[24m";   # dashed underline
+
+# Overline / Strikethrough
+our $aa_overl  = "\e[53m";     our $aar_overl  = "\e[55m";
+our $aa_str    = "\e[9m";      our $aar_str    = "\e[29m";
+
+# Inverse
+our $aa_inv    = "\e[7m";      our $aar_inv    = "\e[27m";
+
+# Weight / style
+our $aa_bo     = "\e[1m";      our $aar_bo     = "\e[22m";   # bold on/off
+our $aa_it     = "\e[3m";      our $aar_it     = "\e[23m";   # italic on/off
+
+# "heavy": map to bold for broad terminal support
+our $aa_heavy  = "\e[1m";      our $aar_heavy  = "\e[22m";
+
+# Convenience combos
+our $aa_boit   = $aa_bo . $aa_it;
+our $aar_boit  = $aar_bo . $aar_it;
+
 
 sub uncolor {
 	$bgbla=$bgred=$bggre='';

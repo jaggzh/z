@@ -37,7 +37,7 @@ sub load_yaml {
     };
     
     if ($@) {
-        warn "Failed to load YAML file '$filepath': $@";
+        swarn "Failed to load YAML file '$filepath': $@";
         return undef;
     }
     $contents;
@@ -60,7 +60,7 @@ sub save_yaml {
     umask($old_umask);
     
     if ($@) {
-        warn "Failed to save YAML file '$filepath': $@";
+        swarn "Failed to save YAML file '$filepath': $@";
         return 0;
     }
     
@@ -193,8 +193,13 @@ sub load_pins {
     return [] unless $session_dir;
     
     my $pins_file = File::Spec->catfile($session_dir, 'pins.yaml');
-    sel 1, "Loading pins from $pins_file";
-    my $pin_data = $self->load_yaml($pins_file);
+    my $pin_data;
+    if (-f $pins_file) {
+		sokl 1, "Loading pins from $pins_file";
+		$pin_data = $self->load_yaml($pins_file);
+	} else {
+		sel 2, "No pins file; NOT loading from $pins_file";
+	}
     
     return $pin_data ? ($pin_data->{pins} || []) : [];
 }

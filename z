@@ -340,6 +340,7 @@ else { $zchat->history->set_mode('rw') }
 if ($opt->wipe) {
     $zchat->history->wipe();
     sel 1, "${yel}Conversation history wiped.$rst";
+    $non_query_acts++;
 }
 
 # Utility: list system prompts

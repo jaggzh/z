@@ -126,6 +126,8 @@ sub _load_config {
     );
 }
 
+# This is old. I'm including it only because we had some more messages
+# in it good for diags but i need to maybe get those into ->query()
 sub _build_messages($self, $user_input, $opts=undef) {
     $opts ||= {};
 
@@ -150,11 +152,13 @@ sub _build_messages($self, $user_input, $opts=undef) {
     my $shims  = $self->{config}->get_pin_shims();
     my $pinned_messages = $self->{pin_mgr}->build_message_array_with_shims(
         $shims,
-        sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
-        user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
-        ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
-        user_template => $self->{config}->get_pin_tpl_user(),
-        ast_template => $self->{config}->get_pin_tpl_ast(),
+		{
+			sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
+			user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
+			ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
+			user_template => $self->{config}->get_pin_tpl_user(),
+			ast_template => $self->{config}->get_pin_tpl_ast(),
+		},
     );
     if (@$pinned_messages) {
         sel(2, "Adding " . @$pinned_messages . " pinned messages");
@@ -240,7 +244,7 @@ sub _resolve_persona_path {
     my $msgpfx = "RESOLVE system prompt -- 'persona'";
 
     unless (defined $bin_persona) {
-    	sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
+        sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
         return undef;
     }
 
@@ -271,16 +275,16 @@ sub _resolve_persona_path {
 
     my $persona_file;
     if (@files > 1) {
-		die "  REFUSING: Multiple persona files found for '$name':"
-			if ! $self->{_fallbacks_ok};
+        die "  REFUSING: Multiple persona files found for '$name':"
+            if ! $self->{_fallbacks_ok};
         sel(1, "  Multiple persona files found for '$name':");
         sel(2, "    $_") for @files;
         sel(1, "  Using first: $files[0]");
     } else {
-		sel(2, "$msgpfx -- file found: $files[0]");
-	}
+        sel(2, "$msgpfx -- file found: $files[0]");
+    }
 
-	$persona_file = $files[0];
+    $persona_file = $files[0];
     unless (-e $persona_file && -r $persona_file) {
         my $msg = "$msgpfx -- Provided file not accessible: $persona_file";
         sel(0, $msg);
@@ -296,9 +300,9 @@ sub _resolve_persona_path {
 # sub trying_to_make_new_resolve_persona_path {
 #     my ($self, $name);
 #     if (!defined $bin_persona) {
-#     	sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
-#     	return undef;
-# 	}
+#         sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
+#         return undef;
+#     }
 #     my @cmd = ($bin_persona, '--path', 'find', $name);
 #     my $cmd = shell_quote(@cmd);
 #     sel 1, "RESOLVE system prompt -- ATTEMPT with 'persona'. Cmd: `$cmd`";
@@ -309,7 +313,7 @@ sub _resolve_persona_path {
 
 
 
-# 	chomp $paths if defined $paths;
+#     chomp $paths if defined $paths;
 #     sel(1, "Loading Persona from disk with persona command");
 #     if ($? != 0) {
 #         sel(1, "'persona' bin ($bin_persona) wasn't found or command errored");
@@ -603,8 +607,8 @@ sub query($self, $user_text, $opts=undef) {
     $opts ||= {};
     my $print_fh;
     if (exists $opts->{print}) {
-		$print_fh = _validate_print_opt($opts->{print});
-	} elsif ($self->{_print_target}) {
+        $print_fh = _validate_print_opt($opts->{print});
+    } elsif ($self->{_print_target}) {
         $print_fh = $self->{_print_target};
     }
     my $on_chunk = exists $opts->{on_chunk} ? $opts->{on_chunk} : $self->{_on_chunk};
@@ -613,18 +617,34 @@ sub query($self, $user_text, $opts=undef) {
 
     # Get system content and auto-detect thought patterns
     my $system_content = $self->_get_system_content();
+    if ($system_content) {
+        sokl 2, "Adding system message, length: " . length($system_content);
+        sel 3, "System content: $system_content";
+    } else {
+        swarnl 2, "No system content found";
+    }
     $self->_auto_detect_thought_pattern($system_content);
 
     # Decide streaming based on thought filtering
     my $should_stream = $self->_should_stream($opts);
 
     if (!$should_stream && $self->_should_filter_thoughts()) {
-        sel 2, "Forcing non-streaming mode for thought pattern filtering";
+        sel 2, "Forcing non-streaming mode for reasoning pattern filtering";
     }
 
-    # Build messages
-    $DB::single=1;
-    my $pins_msgs = $self->{pin_mgr}->build_message_array();
+    # Build messages using the complete template functionality
+    my $shims = $self->{config}->get_pin_shims();
+    my $pins_msgs = $self->{pin_mgr}->build_message_array_with_shims(
+        $shims,
+		{
+			sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
+			user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
+			ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
+			user_template => $self->{config}->get_pin_tpl_user(),
+			ast_template => $self->{config}->get_pin_tpl_ast(),
+		},
+    );
+    
     my @context   = @{ $self->{history}->messages() // [] };
     my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
 
@@ -670,8 +690,8 @@ sub query($self, $user_text, $opts=undef) {
         $raw_response = $filtered_response;
     }
     if ($raw_response !~ /\n$/) {
-    	print $print_fh "\n";
-	}
+        print $print_fh "\n";
+    }
 
     # Store in history
     $self->{history}->append('user', $user_text);
@@ -688,8 +708,8 @@ sub set_allow_fallbacks {
 }
 
 sub set_print($self, $target) {
-	my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
-	my $print_fh = _validate_print_opt($target);
+    my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
+    my $print_fh = _validate_print_opt($target);
     $self->{_print_target} = $print_fh;
     return $self;
 }
@@ -726,17 +746,17 @@ sub list_system_prompts {
 }
 
 sub _validate_print_opt($target) {
-	# Target: 0(silent), 1(*STDOUT), or an open GLOB/IO handle
-	my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
-	my $print_fh;
+    # Target: 0(silent), 1(*STDOUT), or an open GLOB/IO handle
+    my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
+    my $print_fh;
     die "Undefined target passed to set_print(). $accept_msg" if !defined $target;
     if ($target eq 1) {
         $print_fh = *STDOUT;
     } elsif ($target eq 0) {
         $print_fh = undef; # Silent
     } elsif (!openhandle $target) {
-    	die "Unexpected value passed as target of set_print() '$target'. $accept_msg";
-	} else { $print_fh = $target;   # GLOB/IO handle
+        die "Unexpected value passed as target of set_print() '$target'. $accept_msg";
+    } else { $print_fh = $target;   # GLOB/IO handle
     }
     return $print_fh;
 }

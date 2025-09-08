@@ -232,6 +232,22 @@ sub store_session_config {
     # Add created timestamp if new
     $existing->{created} = time() unless exists $existing->{created};
 
+    # If storing any system source, clear others in this scope
+    if (defined $opts{system_prompt} || defined $opts{system_file} || 
+        defined $opts{system_persona} || defined $opts{system}) {
+        
+        # Clear all system sources in session config
+        delete $existing->{system_prompt};
+        delete $existing->{system_file}; 
+        delete $existing->{system_persona};
+        delete $existing->{system};
+        
+        # Set the new one
+        for my $key (qw(system_prompt system_file system_persona system)) {
+            $existing->{$key} = $opts{$key} if defined $opts{$key};
+        }
+    }
+
     # Update with new values
     for my $key (qw(system_prompt system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
         if (defined $opts{$key}) {

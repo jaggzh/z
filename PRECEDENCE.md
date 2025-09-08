@@ -9,7 +9,7 @@ ZChat uses a sophisticated precedence system that allows settings to override ea
 Configuration values are resolved in this order (later values override earlier ones):
 
 ```
-System Defaults → User Global → Session Specific → CLI Runtime
+System Defaults → User Global → Environment Variable → Shell Session → Session Specific → CLI Runtime
 ```
 
 ## Terminology:
@@ -27,9 +27,11 @@ maybe pins messages, etc.
 **Each of those sessions is considered unique and even maintains its own
 conversation history.**
 
+**Shell Session:** A shell-scoped session that persists for the lifetime of your terminal. Uses the session ID (SID) combined with session leader information to create a unique identifier. Stored in `/tmp/zchat-$UID/shell-$sessionid.yaml`.
+
 ### Source of System-Prompt - Precedence
 
-At each scope (system → user → session → CLI), ZChat selects **one** system-prompt source:
+At each scope (system → user → env → shell → session → CLI), ZChat selects **one** system-prompt source:
 
 - If multiple system-prompt sources exist at the **same scope**, the intra-scope priority is:
   1) `system_file`
@@ -38,25 +40,27 @@ At each scope (system → user → session → CLI), ZChat selects **one** syste
   4) `system` (auto-resolve by name: file first, then persona)
 - A higher scope completely replaces lower scopes. No fallback to a lower scope if the chosen source fails to resolve; failure is **an error**.
 
-**Practical flow:** you can set a user-default system string or file (with `--su`), then for a particular session store a different file or string (with `--ss`). CLI flags for the current run override everything.
+**Practical flow:** you can set a user-default system string or file (with `--su`), then for a particular shell set a session (with `--store-pproc`), then for a particular session store a different file or string (with `--ss`). CLI flags for the current run override everything.
 
-### Example: Storing and Using a Session System Prompt
+### Example: Shell Session Workflow
 
-You can use `z --su --system-str "You are a helpful AI assistant"` to set a user-global default.
+```bash
+# Set user default session
+z -n work/main --su
 
-Then create/select a session:
+# In this shell, use a specific project
+z -n work/urgent --store-pproc
+
+# Now all commands in this shell use work/urgent automatically
+z "What's the status?"           # Uses work/urgent session
+z "Review the latest changes"    # Uses work/urgent session
+
+# Override temporarily for one query
+z -n personal/notes "Remember to buy milk"  # Uses personal/notes just once
+
+# Back to shell default
+z "Continue with urgent work"    # Uses work/urgent session again
 ```
-z --su -n my-agent
-```
-Now, store a session-specific prompt:
-```
-z --system-str "You are an unhelpful AI assistant" --ss
-```
-Because the session `my-agent` is your default, a bare call:
-```
-z -- "Help me with my coding."
-````
-will use the **session** system prompt (the "unhelpful AI assistant" one) rather than the user default.
 
 ## **Defaults Priority (Precedence):** Let's get into the nitty-gritty...
 
@@ -75,13 +79,31 @@ will use the **session** system prompt (the "unhelpful AI assistant" one) rather
 session: "work/current-project"
 system_str: "Welcome to my world"   # or system_file: "/abs/or/relative/path"
 # or system_persona: "my-favorite"
-````
+```
 
-### 3. Session Specific Config
+### 3. Environment Variable
+**Source**: `ZCHAT_SESSION` environment variable
+**Purpose**: Scriptable session override without affecting stored configs
+**Usage**:
+```bash
+export ZCHAT_SESSION=work/scripted
+z "Automated query"  # Uses work/scripted session
+```
+
+### 4. Shell Session Config
+**Location**: `/tmp/zchat-$UID/shell-$sessionid.yaml`
+**Purpose**: Session persistence for the current terminal/shell
+**Typical contents**:
+```yaml
+session: "work/urgent"
+```
+**Note**: Shell sessions only store session names, not other configuration.
+
+### 5. Session Specific Config
 
 **Location**: `~/.config/zchat/sessions/{session_name}/session.yaml`
 **Purpose**: Settings specific to a particular session/context
-**Typical contents**: Again, note that a higher-precedence system prompt overrides earlier, regardless of whether it was a stored string or a path (--system-file)
+**Typical contents**: Note that a higher-precedence system prompt overrides earlier, regardless of whether it was a stored string or a path (--system-file)
 
 ```yaml
 created: 1703123456
@@ -92,7 +114,7 @@ system_file: "/path/to/session-specific-prompt.md"
 # system_persona: "api-reviewer"
 ```
 
-### 4. CLI Runtime
+### 6. CLI Runtime
 
 **Source**: Command-line flags like `-n`, `--system-file`, `--system-str`, `--system-persona`, `--system`
 **Purpose**: Immediate overrides for current execution only
@@ -100,15 +122,20 @@ system_file: "/path/to/session-specific-prompt.md"
 
 ## Saving Logic
 
-ZChat provides two storage scopes, providing explicit control over where settings are saved upon saving.
+ZChat provides three storage scopes, providing explicit control over where settings are saved upon saving.
 
 **WARNING:** `--ss` never changes your *default session*. To make a session the
-default for future runs, you must use `--su -n session_name`.
+default for future runs, you must use `--su -n session_name`. Similarly, `--store-pproc` only affects the current shell.
 
 ### `--store-user` (alias `-S` or `--su`)
 
 Stores settings in your user-account's **global config**. They apply
-everywhere unless overridden by a session or CLI.
+everywhere unless overridden by environment, shell, session, or CLI.
+
+### `--store-pproc` (alias `--sp`)
+
+Saves the session name to **shell session config**. The setting applies **only
+to commands run in this shell/terminal**. Only stores session name - other settings are ignored.
 
 ### `--store-session` (alias `--ss`)
 
@@ -128,6 +155,14 @@ z --system-persona architect     --su
 z -n project/backend             --su     # store default session
 ```
 
+### Shell Session Storage (`--store-pproc` / `--sp`)
+
+```bash
+z -n project/urgent --store-pproc   # Use project/urgent for this shell
+z -n work/maintenance --sp          # Switch shell to maintenance work
+# Only session name is stored - other settings ignored for shell scope
+```
+
 ### Session-Specific Storage (`--ss`)
 
 ```bash
@@ -140,89 +175,96 @@ The presence of `-n session_name` with `--su` determines whether session name ge
 
 ## Resolution Examples
 
-### Example 1: Basic System-Prompt Source Precedence
+### Example 1: Shell Session Override
 
 **User config**:
-
 ```yaml
-system_str: "Welcome to my world"
+session: "work/main"
+system_str: "You are helpful"
 ```
 
-**Session config**:
-
+**Shell session config**:
 ```yaml
-system_file: "prompts/api.md"
+session: "work/urgent"
 ```
 
 **CLI**: (none)
 
-**Result**:
+**Result**: Uses `work/urgent` session (from shell) with "You are helpful" system prompt (from user config).
 
-* **System source**: session `system_file` (wins over user `system_str`)
-* **Debug**:
-
-  ```
-  Selected system source: SESSION system_file=prompts/api.md
-  Resolved system_file => /home/you/.config/zchat/sessions/work/project/prompts/api.md
-  ```
-
-### Example 2: Session Defaulting
+### Example 2: Environment Variable Priority
 
 **User config**:
-
 ```yaml
 session: "work/main"
 ```
 
-**CLI**: No `-n` (ie. we didn't override the session)
+**Environment**: `ZCHAT_SESSION=testing/feature`
 
-**Result**: Loads `work/main` session automatically.
+**Shell session**: `work/urgent`
 
-### Example 3: Overrides Taking Over (CLI wins)
+**Result**: Uses `testing/feature` session (environment overrides both user and shell configs).
+
+### Example 3: Complex Precedence Chain
 
 **User config**:
-
 ```yaml
-system_persona: helpful
+session: "default"
+system_persona: "helpful"
 ```
 
-**Session config**:
+**Environment**: `ZCHAT_SESSION=work/main`
 
+**Shell session**:
 ```yaml
-system_file: "prompts/coding.md"
+session: "work/urgent"
 ```
 
-**CLI**:
-
-```bash
-z --system-file ./prompts/debugging.md -n work/project
+**Session config** (work/urgent):
+```yaml
+system_file: "prompts/urgent.md"
 ```
 
-**Resolution (final effective config)**:
+**CLI**: No session override
 
-* **Session name**: `work/project` (from CLI `-n`)
-* **System source**: CLI `system_file=./prompts/debugging.md` (wins over session file and user persona)
-* **Debug**:
-
-  ```
-  Selected system source: CLI system_file=./prompts/debugging.md
-  Resolved system_file => /abs/path/prompts/debugging.md
-  Final system content length: 1234
-  ```
+**Resolution**:
+- **Session name**: `work/urgent` (shell overrides environment and user)
+- **System source**: `prompts/urgent.md` (session file overrides user persona)
 
 ## Common Workflows
 
-### Setting User Defaults
+### Setting Hierarchy
 
 ```bash
-# Make a user-global file prompt the default everywhere
-z --system-file ~/.config/zchat/prompts/helpful.md --su
+# Set user defaults
+z --system-persona helpful -n work/main --su
 
-# Make "work/current" your default session
-z -n work/current --su
+# Set shell defaults for urgent work  
+z -n work/urgent --store-pproc
 
-# Set both as defaults
-z --system-persona architect -n work/current --su
+# Set session-specific prompts
+z -n work/urgent --system-file prompts/incident.md --ss
+
+# Now this shell automatically uses work/urgent with incident.md prompt
+z "What's the current status?"
+```
+
+### Temporary Overrides
+
+```bash
+# Override everything just for this query
+z -n testing/experimental --system-str "Be very careful" "Test this feature"
+# Next command returns to shell default (work/urgent with incident.md)
+```
+
+### Script-Friendly Isolation
+
+```bash
+# In script - don't affect user's shell or global settings
+export ZCHAT_SESSION=automation/deploy
+z "Check deployment status"
+z "Verify all services"
+# User's settings remain untouched
 ```
 
 ### Project-Specific Setup
@@ -234,14 +276,6 @@ z -n project/api --system-file prompts/api.md --ss
 # Later, just use the session
 z -n project/api "How do I handle errors?"
 # Uses prompts/api.md automatically
-```
-
-### Temporary Overrides
-
-```bash
-# Override prompt just for this query
-z -n project/api --system-str "Be concise; prefer examples" "Why is this failing?"
-# Uses the string prompt but doesn't save it
 ```
 
 ### Session Switching
@@ -256,15 +290,21 @@ z -n personal/learn "Explain concepts xyz"      # Uses 'learning' session
 ## Storage File Locations
 
 ### User Global
-
 ```
 ~/.config/zchat/user.yaml
 ```
 
-Contains settings that apply to all sessions unless overridden.
+### Environment Variable
+```
+ZCHAT_SESSION environment variable
+```
+
+### Shell Session
+```
+/tmp/zchat-$UID/shell-$sessionid.yaml
+```
 
 ### Session Specific
-
 ```
 ~/.config/zchat/sessions/{session_path}/session.yaml
 ```
@@ -272,6 +312,41 @@ Contains settings that apply to all sessions unless overridden.
 Session paths support hierarchy: `work/project1`, `personal/learning`, etc.
 
 ## Advanced Patterns
+
+### Shell Isolation for Concurrent Work
+
+```bash
+# Terminal 1: Working on urgent bug
+z -n hotfix/auth-bug --store-pproc
+z --system-str "Focus on authentication issues" --ss
+z "Analyze login failures"
+
+# Terminal 2: Working on feature development  
+z -n feature/api-v2 --store-pproc
+z --system-str "Focus on API design best practices" --ss
+z "Design new endpoint structure"
+
+# Each shell maintains its own session context
+```
+
+### Process Uniqueness
+
+Shell session files use a session identifier based on:
+- **SID**: Session ID (terminal session)  
+- **Session leader info**: Process details for uniqueness
+
+This ensures uniqueness even across system reboots and PID recycling.
+
+### Environment Variable Scripting
+
+```bash
+# Script that uses specific session without affecting user config
+#!/bin/bash
+export ZCHAT_SESSION=deployment/prod
+z "Check server status"
+z "Verify backup completion"
+# User's normal workflow unaffected
+```
 
 ### Temporary Project Work
 
@@ -285,8 +360,8 @@ z -n urgent/hotfix "Performance profiling"
 
 ### Pinning (*also see `help/pins.md` which you can display with `--help-pins`*)
 
-`pin_shims` and `pin_sys_mode` follow the same precedence chain:
-System Defaults → User Global → Session Specific → CLI
+`pin_shims` and `pin_mode_sys` follow the same precedence chain:
+System Defaults → User Global → Environment Variable → Shell Session → Session Specific → CLI
 
 ### Global vs Session Sources
 
@@ -304,7 +379,7 @@ z -- "This is my query"
 # Make session/frontend your default session
 z -n session/frontend --su
 
-z -- "This is my query"   # Now uses session/frontend’s prompt
+z -- "This is my query"   # Now uses session/frontend's prompt
 ```
 
 **Note:** `--ss` stores the prompt **in the session settings** but does **not** make that session your default. Use `--su -n <session>` to change your default session.
@@ -314,9 +389,25 @@ z -- "This is my query"   # Now uses session/frontend’s prompt
 ### Why This Precedence Order?
 
 1. **System defaults**: Ensure system always works
-2. **User global**: Personal preferences should generally apply. This lets you go about using `z` or the `ZChat` module without other setup; for example, you just leave your user-stored system prompt as a generic "You are a helpful AI assistant." (It can be set to come from a file, string, or persona)
-3. **Session specific**: Session needs override personal preferences. This is important so different projects and runs can quickly use a separate conversation history, set their own system-prompts, (AND, for those rare cases, even pin their own content.) They can effectively serve as unique chat histories, but let you store other persistent settings as well.
-4. **CLI runtime**: Immediate need overrides everything, but temporarily
+2. **User global**: Personal preferences should generally apply
+3. **Environment variable**: Script-friendly override without persistence
+4. **Shell session**: Terminal-scoped convenience without global impact
+5. **Session specific**: Project/context needs override personal preferences  
+6. **CLI runtime**: Immediate need overrides everything, but temporarily
+
+### Why Shell Session Storage?
+
+- **Convenience**: No need to repeatedly specify `-n session`
+- **Isolation**: Each terminal can work on different projects simultaneously
+- **Temporary**: Stored in `/tmp` so no long-term cleanup needed
+- **Non-intrusive**: Doesn't affect user global or session-specific configs
+
+### Why Session Name Only for Shell Scope?
+
+Shell sessions are meant for convenience, not full configuration. Storing only session names:
+- **Keeps it simple**: Clear purpose and minimal complexity
+- **Avoids conflicts**: Session-specific configs remain authoritative
+- **Maintains precedence**: Other settings follow normal precedence rules
 
 ### Why Explicit Storage Commands?
 
@@ -330,14 +421,16 @@ The session name itself follows the precedence chain:
 
 1. CLI `-n session_name` (immediate override; either one-time (but the chat history will be saved to disk), or you can use --su to make it persist until you change it).
 2. Constructor `session => 'name'` (programmatic use)
-3. User config `session: 'name'` (personal default)
-4. System default `'default'` (fallback)
+3. Environment variable `ZCHAT_SESSION` (script-friendly)
+4. Shell session config (terminal-scoped)
+5. User config `session: 'name'` (personal default)
+6. System default `'default'` (fallback)
 
 This allows workflows like:
 
 ```bash
-z -n work/urgent -S      # Sets work/urgent as your default session
-z "What should I do?"    # Uses work/urgent automatically from now on
+z -n work/urgent --store-pproc   # Sets work/urgent for this shell
+z "What should I do?"            # Uses work/urgent automatically in this terminal
 ```
 
 ## Debugging Configuration
@@ -348,12 +441,13 @@ Use multiple `-v` flags to see precedence resolution:
 z --system-file prompts/coding.md -n session -vv "test"
 ```
 
-Output should show the **source and kind** selected:
+Output should show the **source and precedence level** selected:
 
 ```
-Using session 'session'
-Selected system source: SESSION system_file=prompts/coding.md
-Resolved system_file => /home/you/.config/zchat/sessions/session/prompts/coding.md
+Using ZCHAT_SESSION env: testing/env
+Using session 'testing/env'
+Selected system source: CLI system_file=prompts/coding.md
+Resolved system_file => /home/you/prompts/coding.md
 Final system content length: 2148
 ```
 

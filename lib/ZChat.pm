@@ -144,13 +144,17 @@ sub _build_messages($self, $user_input, $opts=undef) {
         sel(2, "No system content found");
     }
 
-    # 2. Enforce pin limits then add pinned messages (with shims)
+    # 2. Enforce pin limits then add pinned messages (with shims and templates)
     my $limits = $self->{config}->get_pin_limits();
     $self->{pin_mgr}->enforce_pin_limits($limits);
     my $shims  = $self->{config}->get_pin_shims();
     my $pinned_messages = $self->{pin_mgr}->build_message_array_with_shims(
         $shims,
-		{ sys_mode => ($self->{config}->get_pin_sys_mode() // 'vars') }
+        sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
+        user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
+        ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
+        user_template => $self->{config}->get_pin_tpl_user(),
+        ast_template => $self->{config}->get_pin_tpl_ast(),
     );
     if (@$pinned_messages) {
         sel(2, "Adding " . @$pinned_messages . " pinned messages");

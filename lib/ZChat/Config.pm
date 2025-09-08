@@ -92,17 +92,27 @@ sub load_effective_config {
     if (defined $cli_opts{system_persona}) { $config->{system_persona} = $cli_opts{system_persona}; $config->{_cli_system_persona} = $cli_opts{system_persona}; sel(2, "Setting system_persona from CLI options"); }
     if (defined $cli_opts{system}) { $config->{system} = $cli_opts{system}; $config->{_cli_system} = $cli_opts{system}; sel(2, "Setting system from CLI options"); }
 
-    # Preserve pin_shims / pin_sys_mode CLI handling
+    # Preserve pin_shims / pin_mode CLI handling
     if (defined $cli_opts{pin_shims}) {
         $config->{pin_shims} = $cli_opts{pin_shims};
         sel(2, "Setting pin_shims from CLI options");
     }
-    if (defined $cli_opts{pin_sys_mode}) {
-        $config->{pin_sys_mode} = $cli_opts{pin_sys_mode};
-        sel(2, "Setting pin_sys_mode '$cli_opts{pin_sys_mode}' from CLI options");
+    if (defined $cli_opts{pin_mode_sys}) {
+        $config->{pin_mode_sys} = $cli_opts{pin_mode_sys};
+        sel(2, "Setting pin_mode_sys '$cli_opts{pin_mode_sys}' from CLI options");
     }
-    $config->{_cli_pin_shims}    = $cli_opts{pin_shims}    if defined $cli_opts{pin_shims};
-    $config->{_cli_pin_sys_mode} = $cli_opts{pin_sys_mode} if defined $cli_opts{pin_sys_mode};
+    if (defined $cli_opts{pin_mode_user}) {
+        $config->{pin_mode_user} = $cli_opts{pin_mode_user};
+        sel(2, "Setting pin_mode_user '$cli_opts{pin_mode_user}' from CLI options");
+    }
+    if (defined $cli_opts{pin_mode_ast}) {
+        $config->{pin_mode_ast} = $cli_opts{pin_mode_ast};
+        sel(2, "Setting pin_mode_ast '$cli_opts{pin_mode_ast}' from CLI options");
+    }
+    $config->{_cli_pin_shims}     = $cli_opts{pin_shims}     if defined $cli_opts{pin_shims};
+    $config->{_cli_pin_mode_sys}  = $cli_opts{pin_mode_sys}  if defined $cli_opts{pin_mode_sys};
+    $config->{_cli_pin_mode_user} = $cli_opts{pin_mode_user} if defined $cli_opts{pin_mode_user};
+    $config->{_cli_pin_mode_ast}  = $cli_opts{pin_mode_ast}  if defined $cli_opts{pin_mode_ast};
 
     $self->{effective_config} = $config;
     return $config;
@@ -145,7 +155,11 @@ sub _get_system_defaults {
             user => '<pin-shim/>',
             assistant => '<pin-shim/>',
         },
-        pin_sys_mode => 'vars',   # how system pins are applied: vars|concat|both
+        pin_tpl_user => undef,
+        pin_tpl_ast => undef,
+        pin_mode_sys => 'vars',      # vars|concat|both
+        pin_mode_user => 'concat',   # vars|varsfirst|concat  
+        pin_mode_ast => 'concat',    # vars|varsfirst|concat
     };
 }
 
@@ -191,7 +205,7 @@ sub store_user_config {
     # Load existing config
     my $existing = $self->_load_user_config() || {};
 
-    for my $key (qw(session system_prompt system_file system_persona system pin_sys_mode)) {
+    for my $key (qw(session system_prompt system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
         }
@@ -219,7 +233,7 @@ sub store_session_config {
     $existing->{created} = time() unless exists $existing->{created};
 
     # Update with new values
-    for my $key (qw(system_prompt system_file system_persona system pin_sys_mode)) {
+    for my $key (qw(system_prompt system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
         if (defined $opts{$key}) {
             $existing->{$key} = $opts{$key};
             sel 1, "Storing $key = $opts{$key} in session config";
@@ -280,9 +294,29 @@ sub get_pin_shims {
     return $self->{effective_config}->{pin_shims} || {};
 }
 
-sub get_pin_sys_mode {
+sub get_pin_mode_sys {
     my ($self) = @_;
-    return $self->{effective_config}->{pin_sys_mode} || 'vars';
+    return $self->{effective_config}->{pin_mode_sys} || 'vars';
+}
+
+sub get_pin_mode_user {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_mode_user} || 'concat';
+}
+
+sub get_pin_mode_ast {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_mode_ast} || 'concat';
+}
+
+sub get_pin_tpl_user {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_tpl_user};
+}
+
+sub get_pin_tpl_ast {
+    my ($self) = @_;
+    return $self->{effective_config}->{pin_tpl_ast};
 }
 
 sub set_system_candidate {

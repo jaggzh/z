@@ -224,7 +224,7 @@ sub build_message_array {
 }
 
 sub build_message_array_with_shims($self, $shims, $opts=undef) {
-    $opts ||= {};
+	$opts ||= {};
     $shims ||= {
         user => '<pin-shim/>',
         assistant => '<pin-shim/>',
@@ -232,31 +232,98 @@ sub build_message_array_with_shims($self, $shims, $opts=undef) {
 
     my $messages = $self->build_message_array();
 
-    # Add shims where appropriate
-    for my $msg (@$messages) {
-        next unless $msg->{is_pinned};
-        next if $msg->{role} eq 'system';  # No shims for system messages
+    # Get pin modes and templates
+    my $sys_mode = $opts->{sys_mode} // 'vars';
+    my $user_mode = $opts->{user_mode} // 'concat';
+    my $ast_mode = $opts->{ast_mode} // 'concat';
+    my $user_template = $opts->{user_template};
+    my $ast_template = $opts->{ast_template};
 
-        my $shim = $shims->{$msg->{role}};
-        if ($shim) {
-            $msg->{content} .= "\n" . $shim;
+    # Process each role's pins
+    $self->_process_role_pins($messages, 'system', $sys_mode, $shims, undef);
+    $self->_process_role_pins($messages, 'user', $user_mode, $shims, $user_template);
+    $self->_process_role_pins($messages, 'assistant', $ast_mode, $shims, $ast_template);
+
+    return $messages;
+}
+
+sub _process_role_pins {
+    my ($self, $messages, $role, $mode, $shims, $template) = @_;
+
+    # Find messages for this role
+    my @role_messages = grep { $_->{is_pinned} && $_->{role} eq $role } @$messages;
+    return unless @role_messages;
+
+    if ($mode eq 'vars' || $mode eq 'varsfirst') {
+        # Get all pins for this role for template variables
+        my @role_pins = map { $_->{content} } grep { $_->{role} eq $role } @{$self->{pins}};
+        my $pins_str = join("\n", @role_pins);
+        my $pin_cnt = scalar @role_pins;
+
+        # Determine which template to use
+        my $template_content = $template;
+
+        # Process each message with template variables
+        for my $i (0..$#role_messages) {
+            my $msg = $role_messages[$i];
+            my $pin_idx = $i;
+
+            # For varsfirst mode, only process first message
+            if ($mode eq 'varsfirst' && $pin_idx > 0) {
+                # Clear content for subsequent messages
+                $msg->{content} = '';
+                next;
+            }
+
+            # Use template if provided, otherwise use message content
+            my $content = $template_content // $msg->{content};
+
+            # Apply template processing if content contains template syntax
+            if ($content =~ /<:|:\>/) {
+                my $template_vars = {
+                    pins => \@role_pins,
+                    pins_str => $pins_str,
+                    pin_cnt => $pin_cnt,
+                    pin_idx => $pin_idx,
+                };
+
+                $content = $self->_apply_template($content, $template_vars);
+            }
+
+            $msg->{content} = $content;
+
+            # Add shim if not system role
+            if ($role ne 'system' && $shims->{$role}) {
+                $msg->{content} .= "\n" . $shims->{$role};
+            }
+        }
+    } elsif ($mode eq 'concat') {
+        # Traditional concatenation with shims
+        for my $msg (@role_messages) {
+            if ($role ne 'system' && $shims->{$role}) {
+                $msg->{content} .= "\n" . $shims->{$role};
+            }
         }
     }
 
-    # Optionally suppress/allow system concat per sys_mode
-    my $mode = $opts->{sys_mode} // 'vars';  # vars|concat|both
-    if ($mode eq 'vars') {
-        # remove any system-pinned messages (they came from build_message_array())
-        $messages = [ grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages ];
-    } elsif ($mode eq 'concat') {
-        # keep as-is (system concat msg already present)
-    } elsif ($mode eq 'both') {
-        # keep as-is AND expose via template vars (handled in ZChat.pm)
-    } else {
-        # unknown -> default to vars behavior
-        $messages = [ grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages ];
+    # Handle system mode special cases
+    if ($role eq 'system' && $mode eq 'vars') {
+        # Remove system pinned messages (they'll be in template vars)
+        @$messages = grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages;
     }
-    return $messages;
+}
+
+sub _apply_template {
+    my ($self, $content, $vars) = @_;
+
+    my $tpl = Text::Xslate->new(type => 'text', verbose => 0);
+
+    eval {
+        $content = $tpl->render_string($content, $vars);
+    };
+    warn "Template processing failed: $@" if $@;
+
+    return $content;
 }
 
 sub get_pin_count {

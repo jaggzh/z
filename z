@@ -143,7 +143,11 @@ my ($opt, $usage) = describe_options(
     [ 'pins-clear-ast',     "Clear assistant pins only" ],
     [ 'pins-clear-sys',     "Clear system pins only" ],
     [ 'pin-shim=s',         "Set shim appended to user/assistant pinned messages" ],
-    [ 'pin-sys-mode=s',     "How to include system pins in system prompt: vars|concat|both (default: vars) (eg. <: \$pins_str :> or use array in pins" ],
+	[ 'pin-tpl-user=s',     "Template for user pins when using vars/varsfirst mode" ],
+	[ 'pin-tpl-ast=s',      "Template for assistant pins when using vars/varsfirst mode" ],
+	[ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: vars)" ],
+	[ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: concat)" ],
+	[ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
     [ 'help-sys-pin-vars',  "Show a quick example of template vars to use for system pins", ],
 );
 
@@ -409,8 +413,8 @@ if ($opt->pins_sum) {
 }
 
 if ($opt->pins_cnt) {
-    my $summaries = $zchat->list_pins();
-    say (scalar @$summaries);
+    my $total_pins = $zchat->{pin_mgr}->get_pin_count();
+    say $total_pins;
     $non_query_acts++;
 }
 
@@ -644,8 +648,12 @@ if ($opt->store_session) {
     $store_opts{system_file}    = $opt->system_file if defined $opt->system_file;
     $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
 
-    $store_opts{pin_shims}   = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
-    $store_opts{pin_sys_mode}= $opt->pin_sys_mode if defined $opt->pin_sys_mode;
+    $store_opts{pin_shims}      = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
+    $store_opts{pin_tpl_user}   = $opt->pin_tpl_user if defined $opt->pin_tpl_user;
+    $store_opts{pin_tpl_ast}    = $opt->pin_tpl_ast if defined $opt->pin_tpl_ast;
+    $store_opts{pin_mode_sys}   = $opt->pin_mode_sys if defined $opt->pin_mode_sys;
+    $store_opts{pin_mode_user}  = $opt->pin_mode_user if defined $opt->pin_mode_user;
+    $store_opts{pin_mode_ast}   = $opt->pin_mode_ast if defined $opt->pin_mode_ast;
 
     $zchat->store_session_config(%store_opts);
     say "Stored session config: " . join(", ", sort keys %store_opts) if %store_opts;

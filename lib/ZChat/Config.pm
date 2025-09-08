@@ -9,7 +9,7 @@ use utf8;
 use File::Spec;
 use Cwd qw(abs_path);
 use File::Path qw(make_path);
-use POSIX qw(getsid);
+use ZChat::ParentID qw(get_parent_id);
 use ZChat::Utils ':all';
 
 sub new {
@@ -18,7 +18,7 @@ sub new {
     my $self = {
         storage => ($opts{storage} // die "storage required"),
         session_name => ($opts{session_name} // ''),
-        override_ppid => $opts{override_ppid},
+        override_pproc => $opts{override_pproc},
         effective_config => {},
         _session_config_cache => undef,  # Cache to avoid redundant loads
         _shell_session_id => undef,      # Cache shell session ID
@@ -360,21 +360,14 @@ sub _get_shell_session_id {
     
     return $self->{_shell_session_id} if defined $self->{_shell_session_id};
     
-    my $ppid = $self->{override_ppid} // getppid();
-    my $sid = POSIX::getsid($ppid) // $ppid; # Session ID fallback to PPID
-    
-    # Get process start time for uniqueness (Linux/proc)
-    my $start_time = 0;
-    if (open my $fh, '<', "/proc/$ppid/stat") {
-        my $stat_line = <$fh>;
-        if ($stat_line) {
-            my @fields = split /\s+/, $stat_line;
-            $start_time = $fields[21] // 0; # starttime field
-        }
-        close $fh;
+    if (defined $self->{override_pproc}) {
+        # User override - just use it directly
+        $self->{_shell_session_id} = $self->{override_pproc};
+    } else {
+        # Use the robust cross-platform parent ID
+        $self->{_shell_session_id} = get_parent_id();
     }
     
-    $self->{_shell_session_id} = "${ppid}-${sid}-${start_time}";
     return $self->{_shell_session_id};
 }
 
@@ -399,7 +392,7 @@ sub store_shell_config {
     my ($self, %opts) = @_;
     
     my $shell_config_file = $self->_get_shell_config_file();
-    my $temp_dir = File::Spec->catdir(File::Spec->splitpath($shell_config_file))[1];
+    my $temp_dir = (File::Spec->catdir(File::Spec->splitpath($shell_config_file)))[1];
     make_path($temp_dir) unless -d $temp_dir;
     
     # Only store session name for shell scope

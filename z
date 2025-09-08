@@ -21,7 +21,7 @@ use ZChat::Utils ':all';
 use bansi;
 use Getopt::Long::Descriptive;
 # use Getopt::Long::Descriptive::Opts;
-use POSIX qw(strftime getsid);
+use POSIX qw(strftime);
 use LWP::UserAgent;
 use JSON::XS;
 use URI::Escape;
@@ -98,8 +98,8 @@ my ($opt, $usage) = describe_options(
     [],
     [ 'store-user|su|S',    "Store session in user global config" ],
     [ 'store-session|ss',   "Store in current session config" ],
-    [ 'store-ppid|sp',      "Save session for current shell (PPID-scoped)" ],
-	[ 'set-ppid=i',         "Override parent PID for shell session scope" ],
+    [ 'store-pproc|sp',     "Save ONLY session name for current shell (parent process scope). This uses SID+PPID in POSIX systems, and requires POSIX::2008." ],
+    [ 'set-pproc=i',        "Override parent ID for --store-pproc/--sp, if you think you know better, but when our SID+PPID fail to match you only have yourself to blame." ],
     [],
     [ 'System Prompt:' ],
     [ 'system-str|sstr=s', "Set system prompt as a literal string (highest explicit source after file)" ],
@@ -263,11 +263,11 @@ if ($opt->image) {
 my $zchat;
 
 # Apply configuration/storage changes early (before any blocking/editor work)
-if ($opt->store_user || $opt->store_session || $opt->store_ppid) {
+if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     $zchat = ZChat->new(
         session => $opt->session // '',
         verbose => $verbose,
-        override_ppid => $opt->set_ppid,
+        override_pproc => $opt->set_pproc,
     );
     
     my %store_opts;
@@ -285,11 +285,11 @@ if ($opt->store_user || $opt->store_session || $opt->store_ppid) {
         $zchat->store_session_config(%store_opts);
         $non_query_acts++;
     }
-    if ($opt->store_ppid) {
+    if ($opt->store_pproc) {
         # Only store session name for shell scope
         my %shell_opts = ( session => ($opt->session // $zchat->get_session_name()) );
         $zchat->store_shell_config(%shell_opts);
-        sel 1, "Saved session '$shell_opts{session}' for current shell/parent process";
+        sel 1, "Saved session '$shell_opts{session}' for current shell";
         $non_query_acts++;
     }
     
@@ -301,7 +301,7 @@ if ($opt->store_user || $opt->store_session || $opt->store_ppid) {
     $zchat = ZChat->new(
         session => $opt->session // '',
         verbose => $verbose,
-        override_ppid => $opt->set_ppid,
+        override_pproc => $opt->set_pproc,
     );
 }
 

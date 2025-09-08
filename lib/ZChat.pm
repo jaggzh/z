@@ -34,7 +34,7 @@ sub new {
         system_prompt=> $opts{system_prompt},
         system_file  => $opts{system_file},
         pin_shims    => $opts{pin_shims},
-        override_ppid=> $opts{override_ppid},
+        override_pproc=> $opts{override_pproc},
         config       => undef,
         core         => undef,
         storage      => undef,
@@ -52,7 +52,7 @@ sub new {
     $self->{config}  = ZChat::Config->new(
         storage => $self->{storage},
         session_name => $self->{session_name},
-        override_ppid => $self->{override_ppid},
+        override_pproc => $self->{override_pproc},
     );
 
     # Load effective configuration

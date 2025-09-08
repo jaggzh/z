@@ -130,6 +130,9 @@ __z_opts() {
 --pin-shim
 --pin-sys-mode
 --help-sys-pin-vars
+--output-last --conv1 --c1
+--ol
+
 OPTS
 }
 

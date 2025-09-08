@@ -113,7 +113,8 @@ my ($opt, $usage) = describe_options(
     [ 'input-only|I',       "Use history BUT do not write to it" ],
     [ 'edit-hist|eh|E',     "Edit history in $editor" ],
     [ 'owrite-last=s',      "Overwrite last history message for role (u|user|a|assistant) with current prompt" ],
-    [ 'output-last|conv1|c1=s', "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
+    [ 'conv-last|cl=s',     "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
+    [ 'output-last|ol',     "Write last message to STDOUT (same as '--conv-last -')" ],
     [],
     [ 'Utility:' ],
     [ 'list-sys|sys-list|L', "List available file and 'persona'-based system prompts." ],
@@ -362,6 +363,7 @@ if ($opt->token_count) {
         say $token_count;
     }
     $non_query_acts++;
+    $uprompt = undef;
 }
 
 if ($opt->tokens_full) {
@@ -687,7 +689,8 @@ if (my $role_to_overwrite = $opt->owrite_last) {
 }
 
 # Output last message content (to stdout or a file)
-if (defined $opt->output_last) {
+if (defined $opt->output_last || defined $opt->conv_last) {
+    my $dest = ($opt->output_last//0) ? '-' : $opt->conv_last;
     die "ERROR: Request for --output-last while also providing a query. We don't know how to resolve the mixed output. Aborting."
         if defined $uprompt;
     
@@ -697,9 +700,9 @@ if (defined $opt->output_last) {
     my $last = $zchat->history->get_last();
     my $content = $last->{assistant} ? $last->{assistant}{content} : ($last->{user} ? $last->{user}{content} : '');
     
-    my $dest = $opt->output_last;
     if ($dest eq '-') {
         print $content;
+        print "\n" if $content !~ /\n$/;
     } else {
         my $path = ($dest =~ /^-(.+)$/) ? $1 : $dest;
         write_file($path, $content, { umask=>0177, makepath=>1 })

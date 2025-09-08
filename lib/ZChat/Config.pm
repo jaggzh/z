@@ -127,7 +127,6 @@ sub _resolve_session_name {
     my ($self, $cli_optshr, $config) = @_;
 
     # CLI session takes precedence
-    $DB::single=1;
     return $cli_optshr->{session} if defined $cli_optshr->{session} && $cli_optshr->{session} ne '';
 
     # Then original session_name from constructor
@@ -342,10 +341,18 @@ sub get_pin_tpl_ast {
 }
 
 sub set_system_candidate {
-    my ($self, $scope, %kv) = @_;
+    # kv_optshr:
+    # { file_or_persona => $name });
+    # { system_file => $path });
+    # { system_persona => $name });
+    # { system_string => $text });
+    # { system => $name });
+    my ($self, $scope, $kv_optshr) = @_;
+    $kv_optshr ||= {};
     die "set_system_candidate: scope required" unless defined $scope;
-    my ($k, $v) = each %kv;
-    die "set_system_candidate: exactly one key" unless defined $k && @_ == 4;
+    die "set_system_candidate: exactly one key" unless keys(%{$kv_optshr}) == 1;
+    my ($k) = keys %$kv_optshr;
+    my $v = $kv_optshr->{$k};
     $self->{_sp_candidates} //= {};
     $self->{_sp_candidates}{$scope} //= {};
     $self->{_sp_candidates}{$scope}{$k} = $v;

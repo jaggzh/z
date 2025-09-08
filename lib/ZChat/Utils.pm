@@ -18,6 +18,7 @@ our @EXPORT_OK = qw(
 	se sel pe pel
 	printcon saycon
 	saycon printcon
+	pps
 	dumps
 	read_json_file
 	write_json_file
@@ -52,6 +53,8 @@ sub printcon(@msg) { # Force print to console
     }
 }
 sub saycon(@msg) { printcon(@msg, "\n"); }
+
+sub pps($var) { print(dumps($var)) }
 
 sub dumps($var) {
 	local $Data::Dumper::Indent = 1;  # compact, less indentation

@@ -385,6 +385,7 @@ sub _get_system_content {
         my $tpl = Text::Xslate->new(type=>'text', verbose=>0);
         my $modelname = $self->{core}->get_model_info()->{name} // 'unknown-model';
         my $now = time;
+        my $pin_cnt = $self->{pin_mgr}->get_pin_count("system");
         my $vars = {
             datenow_ymd   => POSIX::strftime("%Y-%m-%d", localtime($now)),
             datenow_iso   => POSIX::strftime("%Y-%m-%dT%H:%M:%S%z", localtime($now)),
@@ -392,6 +393,7 @@ sub _get_system_content {
             modelname     => $modelname,
             pins          => $sys_pins_ar,   # array of system pin strings
             pins_str      => $pins_str,      # "\n" joined system pins
+            pin_cnt       => $pin_cnt,
         };
         $content = $tpl->render_string($content, $vars);
     }
@@ -621,6 +623,7 @@ sub query($self, $user_text, $opts=undef) {
     }
 
     # Build messages
+    $DB::single=1;
     my $pins_msgs = $self->{pin_mgr}->build_message_array();
     my @context   = @{ $self->{history}->messages() // [] };
     my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });

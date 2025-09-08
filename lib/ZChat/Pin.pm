@@ -4,6 +4,7 @@ use feature 'say';
 use experimental 'signatures';
 use strict;
 use warnings;
+use Text::Xslate;
 
 use utf8;
 
@@ -279,14 +280,13 @@ sub _process_role_pins {
             my $content = $template_content // $msg->{content};
 
             # Apply template processing if content contains template syntax
-            if ($content =~ /<:|:\>/) {
+			if ($template_content || $content =~ /<:|:\>|^\s*:/) {
                 my $template_vars = {
                     pins => \@role_pins,
                     pins_str => $pins_str,
                     pin_cnt => $pin_cnt,
                     pin_idx => $pin_idx,
                 };
-
                 $content = $self->_apply_template($content, $template_vars);
             }
 

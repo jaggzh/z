@@ -426,7 +426,7 @@ sub store_shell_config {
     my ($self, %opts) = @_;
     
     my $shell_config_file = $self->_get_shell_config_file();
-    my $temp_dir = (File::Spec->catdir(File::Spec->splitpath($shell_config_file)))[1];
+    my $temp_dir = (File::Spec->splitpath($shell_config_file))[1];
     make_path($temp_dir) unless -d $temp_dir;
     
     # Only store session name for shell scope

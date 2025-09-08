@@ -277,17 +277,17 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     
     my %store_opts;
     $store_opts{session} = $opt->session if defined $opt->session;
-    $store_opts{system_str}  = $opt->system_str if defined $opt->system_str;
+    $store_opts{system_string}  = $opt->system_str if defined $opt->system_str;
     $store_opts{system_file} = $opt->system_file if defined $opt->system_file;
     $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
     $store_opts{system} = $opt->system if defined $opt->system;
     
     if ($opt->store_user)   {
-        $zchat->store_user_config(%store_opts);
+        $zchat->store_user_config(\%store_opts);
         $non_query_acts++;
     }
     if ($opt->store_session) {
-        $zchat->store_session_config(%store_opts);
+        $zchat->store_session_config(\%store_opts);
         $non_query_acts++;
     }
     if ($opt->store_pproc) {
@@ -313,10 +313,10 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
 $zchat->set_print(1); # Module default is silent.
 
 # System prompt setters from CLI (provenance=CLI)
-if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, { scope=>'CLI' } ) }
-if (defined $opt->system_str)     { $zchat->system->set_str($opt->system_str, { scope=>'CLI' } ) }
-if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, { scope=>'CLI' } ) }
-if (defined $opt->system)         { $zchat->system->set_auto($opt->system, { scope=>'CLI' } ) }
+if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, { scope => 'CLI' }) }
+if (defined $opt->system_str)     { $zchat->system->set_str($opt->system_str, { scope => 'CLI' }) }
+if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, { scope => 'CLI' }) }
+if (defined $opt->system)         { $zchat->system->set_auto($opt->system, { scope => 'CLI' }) }
 
 # Thought removal policy from CLI
 if ($opt->thought && ($opt->thought_re//0)) {

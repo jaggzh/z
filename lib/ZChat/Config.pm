@@ -29,7 +29,8 @@ sub new {
 }
 
 sub load_effective_config {
-    my ($self, %cli_opts) = @_;
+    my ($self, $cli_optshr) = @_;
+    $cli_optshr ||= {};
 
     my $config = {};
 
@@ -59,7 +60,7 @@ sub load_effective_config {
     }
 
     # 5. Session config
-    my $effective_session = $self->_resolve_session_name(\%cli_opts, $config);
+    my $effective_session = $self->_resolve_session_name($cli_optshr, $config);
     $config->{session} = $effective_session;
     sel(2, "Using session '$effective_session'");
 
@@ -75,54 +76,59 @@ sub load_effective_config {
 
     # Record source-specific copies for precedence resolution
     $config->{system_file_user}       = $user_config->{system_file}       if $user_config && defined $user_config->{system_file};
-    $config->{system_prompt_user}     = $user_config->{system_prompt}     if $user_config && defined $user_config->{system_prompt};
+    $config->{system_string_user}     = $user_config->{system_string}     if $user_config && defined $user_config->{system_string};
     $config->{system_persona_user}    = $user_config->{system_persona}    if $user_config && defined $user_config->{system_persona};
     $config->{system_user}            = $user_config->{system}            if $user_config && defined $user_config->{system};
 
     if ($session_config) {
         $config->{system_file_session}    = $session_config->{system_file}    if defined $session_config->{system_file};
-        $config->{system_prompt_session}  = $session_config->{system_prompt}  if defined $session_config->{system_prompt};
+        $config->{system_string_session}  = $session_config->{system_string}  if defined $session_config->{system_string};
         $config->{system_persona_session} = $session_config->{system_persona} if defined $session_config->{system_persona};
         $config->{system_session}         = $session_config->{system}         if defined $session_config->{system};
     }
 
     # 6. CLI overrides (runtime only) — stash source-marked copies
-    if (defined $cli_opts{system_str})  { $config->{system_prompt} = $cli_opts{system_str};  $config->{_cli_system_str}  = $cli_opts{system_str};  sel(2, "Setting system_str from CLI options"); }
-    if (defined $cli_opts{system_file}) { $config->{system_file}   = $cli_opts{system_file}; $config->{_cli_system_file} = $cli_opts{system_file}; sel(2, "Setting system_file from CLI options"); }
-    if (defined $cli_opts{system_persona}) { $config->{system_persona} = $cli_opts{system_persona}; $config->{_cli_system_persona} = $cli_opts{system_persona}; sel(2, "Setting system_persona from CLI options"); }
-    if (defined $cli_opts{system}) { $config->{system} = $cli_opts{system}; $config->{_cli_system} = $cli_opts{system}; sel(2, "Setting system from CLI options"); }
+    if (defined $cli_optshr->{system_string}) { $config->{system_string} = $cli_optshr->{system_string};  $config->{_cli_system_string} = $cli_optshr->{system_string};
+        sel(2, "Setting system_string from CLI options"); }
+    if (defined $cli_optshr->{system_file}) { $config->{system_file}   = $cli_optshr->{system_file}; $config->{_cli_system_file} = $cli_optshr->{system_file};
+        sel(2, "Setting system_file from CLI options"); }
+    if (defined $cli_optshr->{system_persona}) { $config->{system_persona} = $cli_optshr->{system_persona}; $config->{_cli_system_persona} = $cli_optshr->{system_persona};
+        sel(2, "Setting system_persona from CLI options"); }
+    if (defined $cli_optshr->{system}) { $config->{system} = $cli_optshr->{system}; $config->{_cli_system} = $cli_optshr->{system};
+        sel(2, "Setting system from CLI options"); }
 
     # Preserve pin_shims / pin_mode CLI handling
-    if (defined $cli_opts{pin_shims}) {
-        $config->{pin_shims} = $cli_opts{pin_shims};
+    if (defined $cli_optshr->{pin_shims}) {
+        $config->{pin_shims} = $cli_optshr->{pin_shims};
         sel(2, "Setting pin_shims from CLI options");
     }
-    if (defined $cli_opts{pin_mode_sys}) {
-        $config->{pin_mode_sys} = $cli_opts{pin_mode_sys};
-        sel(2, "Setting pin_mode_sys '$cli_opts{pin_mode_sys}' from CLI options");
+    if (defined $cli_optshr->{pin_mode_sys}) {
+        $config->{pin_mode_sys} = $cli_optshr->{pin_mode_sys};
+        sel(2, "Setting pin_mode_sys '$cli_optshr->{pin_mode_sys}' from CLI options");
     }
-    if (defined $cli_opts{pin_mode_user}) {
-        $config->{pin_mode_user} = $cli_opts{pin_mode_user};
-        sel(2, "Setting pin_mode_user '$cli_opts{pin_mode_user}' from CLI options");
+    if (defined $cli_optshr->{pin_mode_user}) {
+        $config->{pin_mode_user} = $cli_optshr->{pin_mode_user};
+        sel(2, "Setting pin_mode_user '$cli_optshr->{pin_mode_user}' from CLI options");
     }
-    if (defined $cli_opts{pin_mode_ast}) {
-        $config->{pin_mode_ast} = $cli_opts{pin_mode_ast};
-        sel(2, "Setting pin_mode_ast '$cli_opts{pin_mode_ast}' from CLI options");
+    if (defined $cli_optshr->{pin_mode_ast}) {
+        $config->{pin_mode_ast} = $cli_optshr->{pin_mode_ast};
+        sel(2, "Setting pin_mode_ast '$cli_optshr->{pin_mode_ast}' from CLI options");
     }
-    $config->{_cli_pin_shims}     = $cli_opts{pin_shims}     if defined $cli_opts{pin_shims};
-    $config->{_cli_pin_mode_sys}  = $cli_opts{pin_mode_sys}  if defined $cli_opts{pin_mode_sys};
-    $config->{_cli_pin_mode_user} = $cli_opts{pin_mode_user} if defined $cli_opts{pin_mode_user};
-    $config->{_cli_pin_mode_ast}  = $cli_opts{pin_mode_ast}  if defined $cli_opts{pin_mode_ast};
+    $config->{_cli_pin_shims}     = $cli_optshr->{pin_shims}     if defined $cli_optshr->{pin_shims};
+    $config->{_cli_pin_mode_sys}  = $cli_optshr->{pin_mode_sys}  if defined $cli_optshr->{pin_mode_sys};
+    $config->{_cli_pin_mode_user} = $cli_optshr->{pin_mode_user} if defined $cli_optshr->{pin_mode_user};
+    $config->{_cli_pin_mode_ast}  = $cli_optshr->{pin_mode_ast}  if defined $cli_optshr->{pin_mode_ast};
 
     $self->{effective_config} = $config;
     return $config;
 }
 
 sub _resolve_session_name {
-    my ($self, $cli_opts, $config) = @_;
+    my ($self, $cli_optshr, $config) = @_;
 
     # CLI session takes precedence
-    return $cli_opts->{session} if defined $cli_opts->{session} && $cli_opts->{session} ne '';
+    $DB::single=1;
+    return $cli_optshr->{session} if defined $cli_optshr->{session} && $cli_optshr->{session} ne '';
 
     # Then original session_name from constructor
     return $self->{session_name} if defined $self->{session_name} && $self->{session_name} ne '';
@@ -471,9 +477,9 @@ ZChat::Config - Configuration management with precedence chain
     );
 
     # Load effective configuration (system → user → session → CLI)
-    my $effective = $config->load_effective_config(
+    my $effective = $config->load_effective_config( {
        ??
-    );
+    } );
 
     # Store configurations
     $config->store_user_config(preset => "default");

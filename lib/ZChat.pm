@@ -117,13 +117,13 @@ sub store_shell_config {
 sub _load_config {
     my ($self, %opts) = @_;
 
-    my $config = $self->{config}->load_effective_config(
+    my $config = $self->{config}->load_effective_config( {
         preset => $opts{preset},
         system_prompt => $opts{system_prompt},
         system_file => $opts{system_file},
         pin_shims => $opts{pin_shims},
         pin_sys_mode => $opts{pin_sys_mode},
-    );
+	} );
 }
 
 # This is old. I'm including it only because we had some more messages

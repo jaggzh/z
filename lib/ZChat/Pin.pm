@@ -224,30 +224,6 @@ sub build_message_array {
     return \@messages;
 }
 
-sub build_message_array_with_shims($self, $shims, $opts=undef) {
-	$opts ||= {};
-    $shims ||= {
-        user => '<pin-shim/>',
-        assistant => '<pin-shim/>',
-    };
-
-    my $messages = $self->build_message_array();
-
-    # Get pin modes and templates
-    my $sys_mode = $opts->{sys_mode} // 'vars';
-    my $user_mode = $opts->{user_mode} // 'concat';
-    my $ast_mode = $opts->{ast_mode} // 'concat';
-    my $user_template = $opts->{user_template};
-    my $ast_template = $opts->{ast_template};
-
-    # Process each role's pins
-    $self->_process_role_pins($messages, 'system', $sys_mode, $shims, undef);
-    $self->_process_role_pins($messages, 'user', $user_mode, $shims, $user_template);
-    $self->_process_role_pins($messages, 'assistant', $ast_mode, $shims, $ast_template);
-
-    return $messages;
-}
-
 sub _process_role_pins {
     my ($self, $messages, $role, $mode, $shims, $template) = @_;
 
@@ -271,8 +247,8 @@ sub _process_role_pins {
 
             # For varsfirst mode, only process first message
             if ($mode eq 'varsfirst' && $pin_idx > 0) {
-                # Clear content for subsequent messages
-                $msg->{content} = '';
+                # Mark for removal instead of just clearing content
+                $msg->{_remove} = 1;
                 next;
             }
 
@@ -280,7 +256,7 @@ sub _process_role_pins {
             my $content = $template_content // $msg->{content};
 
             # Apply template processing if content contains template syntax
-			if ($template_content || $content =~ /<:|:\>|^\s*:/) {
+            if ($template_content || $content =~ /<:|:\>|^\s*:/) {
                 my $template_vars = {
                     pins => \@role_pins,
                     pins_str => $pins_str,
@@ -292,10 +268,7 @@ sub _process_role_pins {
 
             $msg->{content} = $content;
 
-            # Add shim if not system role
-            if ($role ne 'system' && $shims->{$role}) {
-                $msg->{content} .= "\n" . $shims->{$role};
-            }
+            # NO shim for vars/varsfirst modes - shims only for concat mode
         }
     } elsif ($mode eq 'concat') {
         # Traditional concatenation with shims
@@ -311,6 +284,71 @@ sub _process_role_pins {
         # Remove system pinned messages (they'll be in template vars)
         @$messages = grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages;
     }
+}
+
+sub build_message_array_with_shims($self, $shims, $opts=undef) {
+    $opts ||= {};
+    $shims ||= {
+        user => '<pin-shim/>',
+        assistant => '<pin-shim/>',
+    };
+
+    my $messages = $self->build_message_array();
+
+    # Get pin modes and templates
+    my $sys_mode = $opts->{sys_mode} // 'vars';
+    my $user_mode = $opts->{user_mode} // 'concat';
+    my $ast_mode = $opts->{ast_mode} // 'concat';
+    my $user_template = $opts->{user_template};
+    my $ast_template = $opts->{ast_template};
+
+    # Process each role's pins
+    $self->_process_role_pins($messages, 'system', $sys_mode, $shims, undef);
+    $self->_process_role_pins($messages, 'user', $user_mode, $shims, $user_template);
+    $self->_process_role_pins($messages, 'assistant', $ast_mode, $shims, $ast_template);
+
+    # Remove messages marked for removal (from varsfirst mode)
+    @$messages = grep { !$_->{_remove} } @$messages;
+
+    # Ensure alternating roles by inserting shims where needed
+    $self->_ensure_alternating_roles($messages, $shims);
+
+    return $messages;
+}
+
+sub _ensure_alternating_roles {
+    my ($self, $messages, $shims) = @_;
+
+    return unless @$messages > 1;
+
+    my @result;
+    my $last_role;
+
+    for my $msg (@$messages) {
+        # Skip system messages for alternating logic
+        if ($msg->{role} eq 'system') {
+            push @result, $msg;
+            next;
+        }
+
+        # If we have consecutive non-system messages of the same role, inject alternate
+        if (defined $last_role && $last_role eq $msg->{role}) {
+            my $alternate_role = ($msg->{role} eq 'user') ? 'assistant' : 'user';
+            my $shim_content = $shims->{$alternate_role} // '<shim/>';
+
+            push @result, {
+                role => $alternate_role,
+                content => $shim_content,
+                is_pinned => 1,
+                _injected_shim => 1,
+            };
+        }
+
+        push @result, $msg;
+        $last_role = $msg->{role} unless $msg->{role} eq 'system';
+    }
+
+    @$messages = @result;
 }
 
 sub _apply_template {

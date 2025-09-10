@@ -100,7 +100,7 @@ __z_opts() {
 --su --S --store-user
 --store-session --ss
 --store-ppid --sp
---system --sys
+--system --sys -s
 --system-file --sfile
 --system-string --sstr
 --system-persona --spersona --persona

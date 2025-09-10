@@ -223,8 +223,7 @@ sub store_user_config {
     return $self->{storage}->save_yaml($user_config_file, $existing);
 }
 
-sub store_session_config {
-    my ($self, %opts) = @_;
+sub store_session_config($self, $optshr) {
 
     my $session_dir = $self->{storage}->get_session_dir($self->{session_name});
     make_path($session_dir) unless -d $session_dir;
@@ -238,8 +237,8 @@ sub store_session_config {
     $existing->{created} = time() unless exists $existing->{created};
 
     # If storing any system source, clear others in this scope
-    if (defined $opts{system_prompt} || defined $opts{system_file} || 
-        defined $opts{system_persona} || defined $opts{system}) {
+    if (defined $optshr->{system_prompt} || defined $optshr->{system_file} || 
+        defined $optshr->{system_persona} || defined $optshr->{system}) {
         
         # Clear all system sources in session config
         delete $existing->{system_prompt};
@@ -249,19 +248,19 @@ sub store_session_config {
         
         # Set the new one
         for my $key (qw(system_prompt system_file system_persona system)) {
-            $existing->{$key} = $opts{$key} if defined $opts{$key};
+            $existing->{$key} = $optshr->{$key} if defined $optshr->{$key};
         }
     }
 
     # Update with new values
     for my $key (qw(system_prompt system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
-        if (defined $opts{$key}) {
-            $existing->{$key} = $opts{$key};
-            sel 1, "Storing $key = $opts{$key} in session config";
+        if (defined $optshr->{$key}) {
+            $existing->{$key} = $optshr->{$key};
+            sel 1, "Storing $key = $$optshr{$key} in session config";
         }
     }
-    if (defined $opts{pin_shims}) {
-        $existing->{pin_shims} = $opts{pin_shims};
+    if (defined $optshr->{pin_shims}) {
+        $existing->{pin_shims} = $optshr->{pin_shims};
     }
 
     # Update cache with new values
@@ -489,8 +488,8 @@ ZChat::Config - Configuration management with precedence chain
     } );
 
     # Store configurations
-    $config->store_user_config(preset => "default");
-    $config->store_session_config(preset => "coding");
+    $config->store_user_config({preset => "default"});
+    $config->store_session_config({preset => "coding"});
 
 =head1 DESCRIPTION
 

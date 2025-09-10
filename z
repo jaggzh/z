@@ -87,7 +87,7 @@ my ($opt, $usage) = describe_options(
     [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
     [ 'play-user|pu',       "Play user text with TTS" ],
     [ 'play-resp|pr',       "Play response text with TTS" ],
-    [ 'probs:s',            "Return probabilities for top N tokens" ],
+    [ 'probs',              "Return probabilities for top N tokens" ],
     [ 'no-color|nc',        "Disable color in interactive mode" ],
     [ 'grammar|g=s',        "Force a grammar" ],
     [ 'thought|think',      "Do not remove reasoning sections" ],
@@ -105,10 +105,11 @@ my ($opt, $usage) = describe_options(
     [ 'system-str|sstr=s', "Set system prompt as a literal string (highest explicit source after file)" ],
     [ 'system-file|sfile=s', "Set system prompt from a file (relative paths allowed)" ],
     [ 'system-persona|spersona|persona=s', "Set system prompt by persona name (resolved by persona tool)" ],
-    [ 'system|sys=s',      "Auto-resolve through -file then -persona (but does NOT accept a string)" ],
+    [ 'system|sys|s=s',     "Auto-resolve through -file then -persona (but does NOT accept a string)" ],
     [],
     [ 'History:' ],
     [ 'wipe|w',             "Wipe conversation history" ],
+    [ 'wipe-old|wo=s',      "Wipe older than {FLOAT TIME}[smhdwMyY] (e.g. 1.5h)" ],
     [ 'no-history|H',       "Do not use history (no load, no store)" ],
     [ 'input-only|I',       "Use history BUT do not write to it" ],
     [ 'edit-hist|eh|E',     "Edit history in $editor" ],
@@ -294,7 +295,7 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     if ($opt->store_pproc) {
         # Only store session name for shell scope
         my %shell_opts = ( session => ($opt->session // $zchat->get_session_name()) );
-        $zchat->store_shell_config(%shell_opts);
+        $zchat->store_shell_config(\%shell_opts);
         sel 1, "Saved session '$shell_opts{session}' for current shell";
         $non_query_acts++;
     }
@@ -324,12 +325,12 @@ if ($opt->thought && ($opt->thought_re//0)) {
     die "Conflict trying to both enable thoughts (--thought) and providing a removal regex (--thought-re).\n";
 }
 if ($opt->thought) {
-    $zchat->set_thought(mode => 'disabled');
+    $zchat->set_thought({mode => 'disabled'});
 } elsif ($opt->thought_re) {
-    $zchat->set_thought(mode => 'enabled', pattern => $opt->thought_re);
+    $zchat->set_thought({mode => 'enabled', pattern => $opt->thought_re});
 } else {
     # Default: auto-detect from system prompt  
-    $zchat->set_thought(mode => 'auto');
+    $zchat->set_thought({mode => 'auto'});
 }
 
 # History mode mapping
@@ -658,7 +659,7 @@ if ($opt->store_session) {
     $store_opts{pin_mode_user}  = $opt->pin_mode_user if defined $opt->pin_mode_user;
     $store_opts{pin_mode_ast}   = $opt->pin_mode_ast if defined $opt->pin_mode_ast;
 
-    $zchat->store_session_config(%store_opts);
+    $zchat->store_session_config(\%store_opts);
     say "Stored session config: " . join(", ", sort keys %store_opts) if %store_opts;
     $non_query_acts++;
     # exit unless defined $uprompt;

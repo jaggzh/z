@@ -80,8 +80,8 @@ sub new {
 }
 
 sub store_shell_config {
-    my ($self, %opts) = @_;
-    return $self->{config}->store_shell_config(%opts);
+    my ($self, $optshr) = @_;
+    return $self->{config}->store_shell_config($optshr);
 }
 
 # sub switch_session {
@@ -115,21 +115,22 @@ sub store_shell_config {
 # }
 
 sub _load_config {
-    my ($self, %opts) = @_;
+    my ($self, $optshr) = @_;
+    $optshr ||= {};
 
     my $config = $self->{config}->load_effective_config( {
-        preset => $opts{preset},
-        system_prompt => $opts{system_prompt},
-        system_file => $opts{system_file},
-        pin_shims => $opts{pin_shims},
-        pin_sys_mode => $opts{pin_sys_mode},
+        preset => $optshr->{preset},
+        system_prompt => $optshr->{system_prompt},
+        system_file => $optshr->{system_file},
+        pin_shims => $optshr->{pin_shims},
+        pin_sys_mode => $optshr->{pin_sys_mode},
 	} );
 }
 
 # This is old. I'm including it only because we had some more messages
 # in it good for diags but i need to maybe get those into ->query()
-sub _build_messages($self, $user_input, $opts=undef) {
-    $opts ||= {};
+sub _build_messages($self, $user_input, $optshr->=undef) {
+    $optshr-> ||= {};
 
     my @messages;
 
@@ -438,10 +439,10 @@ sub _manage_context {
 }
 
 # Pin management methods
-sub pin($self, $content, $opts=undef) {
-    $opts ||= {};
+sub pin($self, $content, $optshr=undef) {
+    $optshr-> ||= {};
     sel 3, "Z->pin(): Adding pin";
-    return $self->{pin_mgr}->add_pin($content, $opts);
+    return $self->{pin_mgr}->add_pin($content, $optshr->);
 }
 
 sub list_pins {
@@ -472,13 +473,13 @@ sub get_session_name {
 
 
 sub store_user_config {
-    my ($self, %opts) = @_;
-    return $self->{config}->store_user_config(%opts);
+    my ($self, $optshr) = @_;
+    return $self->{config}->store_user_config($optshr);
 }
 
 sub store_session_config {
-    my ($self, %opts) = @_;
-    return $self->{config}->store_session_config(%opts);
+    my ($self, $optshr) = @_;
+    return $self->{config}->store_session_config($optshr);
 }
 
 sub history { $_[0]{history} }
@@ -486,49 +487,50 @@ sub history { $_[0]{history} }
 sub system  { $_[0]{system_prompt} }
 
 sub set_thought {
-    my ($self, %opts) = @_;
+    my ($self, $optshr) = @_;
+    $optshr ||= {};
 
     # Handle conflicts first
-    if (defined $opts{mode} && defined $opts{pattern}) {
-        if ($opts{mode} eq 'disabled' && $opts{pattern}) {
+    if (defined $optshr->{mode} && defined $optshr->{pattern}) {
+        if ($optshr->{mode} eq 'disabled' && $optshr->{pattern}) {
             die "Cannot disable thought filtering while also providing a pattern\n";
         }
     }
 
-    if (defined $opts{mode}) {
-        if ($opts{mode} eq 'disabled') {
+    if (defined $optshr->{mode}) {
+        if ($optshr->{mode} eq 'disabled') {
             $self->{_thought}{mode} = 'disabled';
             $self->{_thought}{pattern} = undef;
             sel 1, "Thought filtering DISABLED - all reasoning will be shown";
         }
-        elsif ($opts{mode} eq 'enabled') {
+        elsif ($optshr->{mode} eq 'enabled') {
             $self->{_thought}{mode} = 'enabled';
-            if (defined $opts{pattern}) {
-                $self->{_thought}{pattern} = $opts{pattern};
+            if (defined $optshr->{pattern}) {
+                $self->{_thought}{pattern} = $optshr->{pattern};
                 sel 1, "Thought filtering ENABLED with custom pattern";
             } else {
                 $self->{_thought}{pattern} = $def_thought_re;
                 sel 1, "Thought filtering ENABLED with default pattern";
             }
         }
-        elsif ($opts{mode} eq 'auto') {
+        elsif ($optshr->{mode} eq 'auto') {
             $self->{_thought}{mode} = 'auto';
             $self->{_thought}{pattern} = undef;
             sel 1, "Thought filtering set to AUTO-DETECT from system prompt";
         }
         else {
-            die "Invalid thought mode '$opts{mode}' - must be 'auto', 'enabled', or 'disabled'\n";
+            die "Invalid thought mode '$$optshr{mode}' - must be 'auto', 'enabled', or 'disabled'\n";
         }
     }
-    elsif (defined $opts{pattern}) {
+    elsif (defined $optshr->{pattern}) {
         # Pattern provided without mode - assume enabled
-        if (($opts{pattern} // '') =~ /^\s*$/) {
+        if (($optshr->{pattern} // '') =~ /^\s*$/) {
             warn "Empty or whitespace-only thought pattern provided - thought filtering disabled\n";
             $self->{_thought}{mode} = 'disabled';
             $self->{_thought}{pattern} = undef;
         } else {
             $self->{_thought}{mode} = 'enabled';
-            $self->{_thought}{pattern} = $opts{pattern};
+            $self->{_thought}{pattern} = $optshr->{pattern};
             sel 1, "Thought filtering ENABLED with provided pattern";
         }
     }
@@ -572,10 +574,10 @@ sub _should_filter_thoughts {
 }
 
 sub _should_stream {
-    my ($self, $opts) = @_;
+    my ($self, $optshr) = @_;
 
     # If user explicitly requests no streaming, honor it
-    return 0 if defined $opts->{stream} && !$opts->{stream};
+    return 0 if exists $optshr->{stream} && !$optshr->{stream};
 
     # If thought filtering is active, force non-streaming so regex can work on complete text
     return 0 if $self->_should_filter_thoughts();
@@ -603,15 +605,15 @@ sub _apply_thought_filter {
     return $text;
 }
 
-sub query($self, $user_text, $opts=undef) {
-    $opts ||= {};
+sub query($self, $user_text, $optshro=undef) {
+    $optshro ||= {};
     my $print_fh;
-    if (exists $opts->{print}) {
-        $print_fh = _validate_print_opt($opts->{print});
+    if (exists $optshro->{print}) {
+        $print_fh = _validate_print_opt($optshro->{print});
     } elsif ($self->{_print_target}) {
         $print_fh = $self->{_print_target};
     }
-    my $on_chunk = exists $opts->{on_chunk} ? $opts->{on_chunk} : $self->{_on_chunk};
+    my $on_chunk = exists $optshro->{on_chunk} ? $optshro->{on_chunk} : $self->{_on_chunk};
 
     $self->{history}->load();
 
@@ -626,7 +628,7 @@ sub query($self, $user_text, $opts=undef) {
     $self->_auto_detect_thought_pattern($system_content);
 
     # Decide streaming based on thought filtering
-    my $should_stream = $self->_should_stream($opts);
+    my $should_stream = $self->_should_stream($optshro);
 
     if (!$should_stream && $self->_should_filter_thoughts()) {
         sel 2, "Forcing non-streaming mode for reasoning pattern filtering";
@@ -795,9 +797,9 @@ ZChat - Perl interface to LLM chat completions with session management
     $z->pin("Use code blocks for examples.", role => 'user');
     my $pins = $z->list_pins();
 
-    # Configuration storage
+    # Configuration storage. old.. needs updating
     $z->store_user_config(preset => "default");
-    $z->store_session_config(preset => "coding-assistant");
+    $z->store_session_config({preset => "coding-assistant"});
 
 =head1 DESCRIPTION
 

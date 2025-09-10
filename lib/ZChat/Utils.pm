@@ -169,8 +169,8 @@ sub read_json_file {
     return $result;
 }
 
-sub write_json_file($filepath, $data, $optshr=undef) {
-    $optshr ||= {};
+sub write_json_file($filepath, $data, $optshro=undef) {
+    $optshro ||= {};
 	# Important: Defaults to makepath=>1
 	# (filepath, data, {options})
 	# options
@@ -180,10 +180,10 @@ sub write_json_file($filepath, $data, $optshr=undef) {
 	#    umask set your own umask. default is probably 0177;
 	#       set umask=>undef to use current user default umask
 	#    makepath=>0 to disable make_path()
-    my $umask = exists($optshr->{umask}) ? $optshr->{umask} : 0177;
-    my $pretty = $optshr->{pretty} // 0;
-    my $prettymin = $optshr->{prettymin} // $optshr->{min} // 0; # Reduce indent
-    my $makepath = $optshr->{makepath} // 0;
+    my $umask = exists($optshro->{umask}) ? $optshro->{umask} : 0177;
+    my $pretty = $optshro->{pretty} // 0;
+    my $prettymin = $optshro->{prettymin} // $optshro->{min} // 0; # Reduce indent
+    my $makepath = $optshro->{makepath} // 0;
 
     # Ensure directory exists
     my $dir = (File::Spec->splitpath($filepath))[1];
@@ -223,15 +223,15 @@ sub read_file {
     $content;
 }
 
-sub write_file($filepath, $content, $optshr=undef) {
-    $optshr ||= {};
+sub write_file($filepath, $content, $optshro=undef) {
+    $optshro ||= {};
 	# Important: Defaults to makepath=>1
 	# options:
 	#    umask set your own umask. default is probably 0177;
 	#       set umask=>undef to use current user default umask
 	#    makepath=>0 to disable make_path()
-    my $umask = exists($optshr->{umask}) ? $optshr->{umask} : 0177;
-    my $makepath = $optshr->{makepath} // 1;
+    my $umask = exists($optshro->{umask}) ? $optshro->{umask} : 0177;
+    my $makepath = $optshro->{makepath} // 1;
 
     # Ensure directory exists
     my $dir = (File::Spec->splitpath($filepath))[1];

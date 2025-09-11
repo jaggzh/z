@@ -451,14 +451,14 @@ sub _load_shell_config {
 }
 
 sub store_shell_config {
-    my ($self, %opts) = @_;
+    my ($self, $optshr) = @_;
     
     my $shell_config_file = $self->_get_shell_config_file();
     my $temp_dir = (File::Spec->splitpath($shell_config_file))[1];
     make_path($temp_dir) unless -d $temp_dir;
     
     # Only store session name for shell scope
-    my $config = { session => $opts{session} };
+    my $config = { session => $optshr->{session} };
     
     sel 1, "Saving shell session config: $shell_config_file";
     return $self->{storage}->save_yaml($shell_config_file, $config);

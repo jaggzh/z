@@ -121,8 +121,7 @@ my ($opt, $usage) = describe_options(
     [ 'list-sys|sys-list|L', "List available file and 'persona'-based system prompts." ],
     [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
     [],
-    [ 'Message pinning:' ],
-    [ 'help-pins',          "Show detailed help for pinning" ],
+    [ 'Message pinning (see --help-pins):' ],
     [ 'pin=s@',             "Add pinned message(s)" ],
     [ 'pins-file=s@',       "Add pinned message(s) from file(s)" ],
     [ 'pins-list',          "List all pinned messages (their lines will wrap)" ],
@@ -150,23 +149,57 @@ my ($opt, $usage) = describe_options(
 	[ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: vars)" ],
 	[ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: concat)" ],
 	[ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
-    [ 'help-sys-pin-vars',  "Show a quick example of template vars to use for system pins", ],
+	[ 'Help:' ],
+    [ 'help-sys-pin-vars',  "Show quick example of template vars to use for system pins", ],
+    [ 'help-pins',          "Show detailed help for pinning" ],
+    [ 'help-cli',           "CLI use - Basic", ],
+    [ 'help-cli-adv',       "cli use - Advanced", ],
 );
 
 @ARGV = map { decode('UTF-8', $_) } @ARGV;
 
-if ($opt->help) { print($usage->text), exit; }
+if ($opt->help) {
+    my $pager = pager();
+    print $pager ($usage->text);
+    print $pager <<~'EOT';
+        Basic usage:
+
+        Select or create 'myprj' session, store it active in the
+         current shell session group, and perform a query, which will
+         be stored in 'myprj' chat history.
+        $ z -n myprj --sp -- "What's a SID and Session Group Leader?"
+
+        Same, but subdirs can be used
+        $ z -n myprj/subprj --sp -- "Help me"
+        $ z -n myprj -- "One-time use of myprj, not saved."
+
+        Store 'default' as user global session (to be used when session
+         is not specified or not set with --sp in the current shell.
+        $ z -n default --su # Store 'default' as user global session
+
+        $ z I can query unsafely too.
+        $ cat q.txt | z -
+
+        System prompt name (from system files or through 'persona' bin)
+         Here I'm specifying cat-talk as my session, and storing (-ss)
+         its active system prompt name as 'my-cat'
+        $ z --system my-cat --ss -n cat-talk -- "I stored my-cat in my 'session')
+
+        Provide a path to the system prompt, and store it default in
+         the 'cat-talk' session.
+        $ z --system-file here/sys.txt --ss -n cat-talk -- "And a query."
+        EOT
+    pagerdone($pager);
+    exit;
+}
 
 $verbose = $opt->verbose;
 set_verbose($verbose); # In Utils
 $verbose_resp = $opt->verbose_resp;
 
-if ($opt->help_pins) {
-    my $help_path = File::Spec->catfile($FindBin::RealBin, 'help', 'pins.md');
-    if (-e $help_path) { print read_text($help_path) }
-    else { say "No pins help found (expected file at $help_path)" }
-    exit;
-}
+if ($opt->help_pins) { show_help_file('pins.md'); exit; }
+if ($opt->help_cli) { show_help_file('cli.md'); exit; }
+if ($opt->help_cli_adv) { show_help_file('cli-adv.md'); exit; }
 
 if ($opt->help_sys_pin_vars) {
     print <<~'EOT';

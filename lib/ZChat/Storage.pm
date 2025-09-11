@@ -10,6 +10,7 @@ use YAML::XS qw(LoadFile DumpFile);
 use JSON::XS;
 use File::Spec;
 use File::Path qw(make_path);
+use Carp;
 
 use ZChat::Utils ':all';
 
@@ -72,6 +73,12 @@ sub get_session_dir {
     my ($self, $session_name) = @_;
     
     return undef unless $session_name;
+    if ($session_name =~ m#(?:^|/)\.\.(?:/|$)#) {
+    	cnfs "get_session_dir(): Parent dirs (..) not currently accepted in session names.\n";
+	}
+    if ($session_name =~ m#^/#) {
+    	cnfs "get_session_dir(): Root (^/) cannot start a session name.\n";
+	}
     
     my $home = $ENV{HOME} || die "HOME environment variable not set";
     my $config_dir = File::Spec->catdir($home, '.config', 'zchat');

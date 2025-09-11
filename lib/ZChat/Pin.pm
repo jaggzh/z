@@ -286,8 +286,8 @@ sub _process_role_pins {
     }
 }
 
-sub build_message_array_with_shims($self, $shims, $opts=undef) {
-    $opts ||= {};
+sub build_message_array_with_shims($self, $shims, $optshro=undef) {
+    $optshro ||= {};
     $shims ||= {
         user => '<pin-shim/>',
         assistant => '<pin-shim/>',
@@ -296,11 +296,11 @@ sub build_message_array_with_shims($self, $shims, $opts=undef) {
     my $messages = $self->build_message_array();
 
     # Get pin modes and templates
-    my $sys_mode = $opts->{sys_mode} // 'vars';
-    my $user_mode = $opts->{user_mode} // 'concat';
-    my $ast_mode = $opts->{ast_mode} // 'concat';
-    my $user_template = $opts->{user_template};
-    my $ast_template = $opts->{ast_template};
+    my $sys_mode = $optshro->{sys_mode} // 'vars';
+    my $user_mode = $optshro->{user_mode} // 'concat';
+    my $ast_mode = $optshro->{ast_mode} // 'concat';
+    my $user_template = $optshro->{user_template};
+    my $ast_template = $optshro->{ast_template};
 
     # Process each role's pins
     $self->_process_role_pins($messages, 'system', $sys_mode, $shims, undef);

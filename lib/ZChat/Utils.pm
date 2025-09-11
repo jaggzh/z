@@ -13,10 +13,13 @@ use JSON::XS;
 use ZChat::ansi; # ANSI color vars: $red, $gre (green), $gra (gray); prefix b* for bright (e.g. $bgre), bg* for backgrounds (e.g. $bgred), and $rst to reset; 24-bit via a24fg(r,g,b)/a24bg(r,g,b)
 use Data::Dumper;
 use utf8;
+use Carp; $Carp::Verbose=1;
+use Term::Size 'chars';
 
 our @EXPORT_OK = qw(
 	set_verbose get_verbose
 	se sel pe pel
+	cnfs
 	printcon saycon
 	saycon printcon
 	pps
@@ -32,6 +35,8 @@ our @EXPORT_OK = qw(
 	_decode_pipestring_part
 	sok swarn serr sultraerr
 	sokl swarnl serrl sultraerrl
+	pager pagerdone
+	show_help_file
 );
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
@@ -42,7 +47,8 @@ our $json_compact = JSON::XS->new->ascii->canonical; # For our custom json forma
 our $verbose = $ENV{ZCHAT_VERBOSE} // 0;  # 0=quiet, 1,2,3...
 our $uc_ok = "✔";  # Unicode "Good/OK/Checkmark"
 our $uc_warn = "⚠";  # Unicode "Warning"
-our $uc_err = "✖";  # Unicode "Error/Times"
+our $uc_err = "⚠️";  # Unicode "Error/Times"
+our $uc_fail = "❌";  # CROSS MARK
 our $uc_uerr = "⛔";  # Unicode "Ultra Error / No Entry"
 
 my $PIPE_DELIM_RE = qr/(?<!\\)(?:\\\\){,20}\K\|\|\|/;
@@ -60,6 +66,8 @@ sub sel($lvl, @msg) { say STDERR @msg if $verbose >= $lvl }
 sub se(@msg) { say STDERR @msg; }
 sub pel($lvl, @msg) { print STDERR @msg if $verbose >= $lvl }
 sub pe(@msg) { print STDERR @msg }
+
+sub cnfs($str) { croak "$a_err$uc_err$str$rst" }
 
 sub sok(@msg)      { se "$uc_ok $a_ok",       @msg, $rst; }
 sub swarn(@msg)    { se "$uc_warn $a_warn",   @msg, $rst; }
@@ -296,6 +304,56 @@ sub encode_pipestr_part {
     $s =~ s/\|/\\|/g;    # then pipes
     $s =~ s/\n/\\n/g;    # then newlines
     return $s;
+}
+
+sub pager { # $p = pager(); print $p "stuff"; pagerend();
+    my $pager;
+    open($pager, '|-', ($ENV{PAGER} // 'less -F')) && return $pager;
+    \*STDOUT;
+}
+sub pagerdone($p) {
+    close $p;
+}
+
+sub show_file_md($path) {
+	my ($cols, $rows) = chars;
+	$cols //= 79;
+
+    my @commands = (
+        # "glow \Q$path\E --tui", # --tui doesn't honor -w width
+        "glow \Q$path\E -p -w $cols", # 
+        "mdcat \Q$path\E -p", # Low priority; doesn't handle tables
+        "highlight -O truecolor -s base16/monokai \Q$path\E | less -FR", 
+        "bat \Q$path\E --paging=always --language=markdown --style=plain", # no tables
+		# Untested:
+		"rich \Q$path\E --markdown --pager", # Python rich library
+		"mdv \Q$path\E", # Terminal markdown viewer (has built-in pager)
+		"pandoc \Q$path\E -t plain | less -FR", # Convert to plain text
+		"markdown \Q$path\E | w3m -T text/html", # Convert to HTML, view in w3m
+    );
+    for my $cmd (@commands) {
+        my ($prog) = $cmd =~ /^(\w+)/;
+        next unless system("which $prog >/dev/null 2>&1") == 0;
+        return 1 if system($cmd) == 0;
+    }
+    
+    warn "No markdown viewers found, showing as plain text\n";
+    my $pager = pager();
+    print $pager read_text($path);
+    pagerdone($pager);
+    return 1;
+}
+
+sub show_help_file($f) {
+    my $path = File::Spec->catfile($FindBin::RealBin, 'help', $f);
+    if (! -e $path) { swarn "No help file found at $path"; return 0; }
+    if ($path =~ /\.md$/) {
+    	show_file_md($path);
+	} else {
+		my $pager = pager();
+		print $pager read_text($path);
+		pagerdone($pager);
+	}
 }
 
 1;

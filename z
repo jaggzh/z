@@ -304,7 +304,12 @@ my $zchat = ZChat->new(
     session => $opt->session // '',
     verbose => $verbose,
     override_pproc => $opt->set_pproc,
+    system_string => $opt->system_string,
+    system_file => $opt->system_file,
+    system_persona => $opt->system_persona,
+    system => $opt->system,
 );
+
 
 # Apply configuration/storage changes early (before any blocking/editor work)
 if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
@@ -356,12 +361,15 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
 
 $zchat->set_print(1); # Module default is silent.
 
-# System prompt setters from CLI (provenance=CLI)
-if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, { scope => 'CLI' }) }
-if (defined $opt->system_string)     { $zchat->system->set_str($opt->system_string, { scope => 'CLI' }) }
-if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, { scope => 'CLI' }) }
-$DB::single=1;
-if (defined $opt->system)         { $zchat->system->set_auto($opt->system, { scope => 'CLI' }) }
+# This is redundant. zchat->new is handling this (or at least it should be)
+# Also, these aren't used for later resolution so they fail to serve their primary purpose anyway.
+# This area should be removed entirely (according to claude).
+# # System prompt setters from CLI (provenance=CLI)
+# if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, { scope => 'CLI' }) }
+# if (defined $opt->system_string)     { $zchat->system->set_str($opt->system_string, { scope => 'CLI' }) }
+# if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, { scope => 'CLI' }) }
+# $DB::single=1;
+# if (defined $opt->system)         { $zchat->system->set_auto($opt->system, { scope => 'CLI' }) }
 
 # Thought removal policy from CLI
 if ($opt->thought && ($opt->thought_re//0)) {

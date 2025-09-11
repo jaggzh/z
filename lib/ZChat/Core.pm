@@ -27,8 +27,8 @@ sub new {
     return $self;
 }
 
-sub complete_request($self, $messages, $opts=undef) {
-    $opts ||= {};
+sub complete_request($self, $messages, $optshro=undef) {
+    $optshro ||= {};
 
     sel(2, "Making completion request with " . @$messages . " messages");
 
@@ -44,12 +44,12 @@ sub complete_request($self, $messages, $opts=undef) {
     }
 
     # Default options
-    my $temperature = $opts->{temperature} || 0.7;
-    my $top_k = $opts->{top_k} || 40;
-    my $top_p = $opts->{top_p} || 0.9;
-    my $min_p = $opts->{min_p} || 0.08;
-    my $n_predict = $opts->{n_predict} || 8192;
-    my $stream = $opts->{stream} // 1;
+    my $temperature = $optshro->{temperature} || 0.7;
+    my $top_k = $optshro->{top_k} || 40;
+    my $top_p = $optshro->{top_p} || 0.9;
+    my $min_p = $optshro->{min_p} || 0.08;
+    my $n_predict = $optshro->{n_predict} || 8192;
+    my $stream = $optshro->{stream} // 1;
 
     # Get model info
     my $model_info = $self->get_model_info();
@@ -71,22 +71,21 @@ sub complete_request($self, $messages, $opts=undef) {
     };
 
     # Add grammar if specified
-    $data->{grammar} = $opts->{grammar} if $opts->{grammar};
-    $data->{n_probs} = int($opts->{n_probs}) if $opts->{n_probs};
+    $data->{grammar} = $optshro->{grammar} if $optshro->{grammar};
+    $data->{n_probs} = int($optshro->{n_probs}) if $optshro->{n_probs};
 
     sel(3, "API request data: " . dumps($data));
 
     if ($stream) {
-        return $self->_stream_completion($data, $opts);
+        return $self->_stream_completion($data, $model_name, $optshro);
     } else {
-        return $self->_sync_completion($data, $opts);
+        return $self->_sync_completion($data, $model_name, $optshro);
     }
 }
 
-sub _stream_completion($self, $data, $opts=undef) {
-    $opts ||= {};
-
-    my $on_chunk = $opts->{on_chunk};
+sub _stream_completion($self, $data, $model_name, $optshro=undef) {
+	$optshro ||= {};
+    my $on_chunk = $optshro->{on_chunk};
 
     my $ua = Mojo::UserAgent->new(max_response_size => 0);
     my $tx = $ua->build_tx(
@@ -98,6 +97,7 @@ sub _stream_completion($self, $data, $opts=undef) {
     my $answer = '';
     my $token_count = 0;
     my $buffer = '';
+    my $usage_info = {};
 
     $tx->res->content->unsubscribe('read')->on(read => sub {
         my ($content, $bytes) = @_;
@@ -122,6 +122,11 @@ sub _stream_completion($self, $data, $opts=undef) {
                 my $decoded;
                 eval { $decoded = decode_json($json_str); };
                 next if $@;
+
+                # Extract usage info if present (usually in final chunk)
+                if ($decoded->{usage}) {
+                    $usage_info = $decoded->{usage};
+                }
 
                 # Check for completion
                 my $choice = $decoded->{choices}[0];
@@ -149,13 +154,24 @@ sub _stream_completion($self, $data, $opts=undef) {
     # Execute request
     $ua->start($tx);
 
-    return $answer;
+    # Return both content and metadata
+    return {
+        content => $answer,
+        metadata => {
+            model => $model_name,
+            tokens_input => $usage_info->{prompt_tokens} || 0,
+            tokens_output => $usage_info->{completion_tokens} || 0,
+            tokens_total => $usage_info->{total_tokens} || 0,
+            finish_reason => 'stop', # Default for streaming
+            request_time => time,
+        }
+    };
 }
 
-sub _sync_completion {
-    my ($self, $data, $opts) = @_;
-    $opts ||= {};
+sub _sync_completion($self, $data, $model_name, $optshro=undef) {
+    $optshro ||= {};
 
+    my $start_time = time;
     my $ua = Mojo::UserAgent->new();
     my $tx = $ua->post(
         "$self->{api_base}/v1/chat/completions",
@@ -169,16 +185,30 @@ sub _sync_completion {
 
     my $response = $tx->res->json;
     my $content = $response->{choices}[0]{message}{content} || '';
+    my $usage = $response->{usage} || {};
+    my $choice = $response->{choices}[0] || {};
 
     # Post-process if needed
-    my $remove_pattern = $opts->{remove_pattern};
-    my $show_thought = $opts->{show_thought} || 0;
+    my $remove_pattern = $optshro->{remove_pattern};
+    my $show_thought = $optshro->{show_thought} || 0;
 
     if ($remove_pattern && !$show_thought) {
         $content =~ s/$remove_pattern//s;
     }
 
-    return $content;
+    # Return both content and metadata
+    return {
+        content => $content,
+        metadata => {
+            model => $model_name,
+            tokens_input => $usage->{prompt_tokens} || 0,
+            tokens_output => $usage->{completion_tokens} || 0,
+            tokens_total => $usage->{total_tokens} || 0,
+            finish_reason => $choice->{finish_reason} || 'stop',
+            request_time => $start_time,
+            response_time => time - $start_time,
+        }
+    };
 }
 
 sub get_model_info {

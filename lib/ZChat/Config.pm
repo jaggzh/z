@@ -28,9 +28,8 @@ sub new {
     return $self;
 }
 
-sub load_effective_config {
-    my ($self, $cli_optshr) = @_;
-    $cli_optshr ||= {};
+sub load_effective_config($self, $cli_optshro=undef) {
+    $cli_optshro ||= {};
 
     my $config = {};
 
@@ -60,7 +59,7 @@ sub load_effective_config {
     }
 
     # 5. Session config
-    my $effective_session = $self->_resolve_session_name($cli_optshr, $config);
+    my $effective_session = $self->_resolve_session_name($cli_optshro, $config);
     $config->{session} = $effective_session;
     sel(2, "Using session '$effective_session'");
 
@@ -88,43 +87,43 @@ sub load_effective_config {
     }
 
     # 6. CLI overrides (runtime only) — stash source-marked copies
-    if (defined $cli_optshr->{system_string}) { $config->{system_string} = $cli_optshr->{system_string};  $config->{_cli_system_string} = $cli_optshr->{system_string};
+    if (defined $cli_optshro->{system_string}) { $config->{system_string} = $cli_optshro->{system_string};  $config->{_cli_system_string} = $cli_optshro->{system_string};
         sel(2, "Setting system_string from CLI options"); }
-    if (defined $cli_optshr->{system_file}) { $config->{system_file}   = $cli_optshr->{system_file}; $config->{_cli_system_file} = $cli_optshr->{system_file};
+    if (defined $cli_optshro->{system_file}) { $config->{system_file}   = $cli_optshro->{system_file}; $config->{_cli_system_file} = $cli_optshro->{system_file};
         sel(2, "Setting system_file from CLI options"); }
-    if (defined $cli_optshr->{system_persona}) { $config->{system_persona} = $cli_optshr->{system_persona}; $config->{_cli_system_persona} = $cli_optshr->{system_persona};
+    if (defined $cli_optshro->{system_persona}) { $config->{system_persona} = $cli_optshro->{system_persona}; $config->{_cli_system_persona} = $cli_optshro->{system_persona};
         sel(2, "Setting system_persona from CLI options"); }
-    if (defined $cli_optshr->{system}) { $config->{system} = $cli_optshr->{system}; $config->{_cli_system} = $cli_optshr->{system};
+    if (defined $cli_optshro->{system}) { $config->{system} = $cli_optshro->{system}; $config->{_cli_system} = $cli_optshro->{system};
         sel(2, "Setting system from CLI options"); }
 
     # Preserve pin_shims / pin_mode CLI handling
-    if (defined $cli_optshr->{pin_shims}) {
-        $config->{pin_shims} = $cli_optshr->{pin_shims};
+    if (defined $cli_optshro->{pin_shims}) {
+        $config->{pin_shims} = $cli_optshro->{pin_shims};
         sel(2, "Setting pin_shims from CLI options");
     }
-    if (defined $cli_optshr->{pin_mode_sys}) {
-        $config->{pin_mode_sys} = $cli_optshr->{pin_mode_sys};
-        sel(2, "Setting pin_mode_sys '$cli_optshr->{pin_mode_sys}' from CLI options");
+    if (defined $cli_optshro->{pin_mode_sys}) {
+        $config->{pin_mode_sys} = $cli_optshro->{pin_mode_sys};
+        sel(2, "Setting pin_mode_sys '$cli_optshro->{pin_mode_sys}' from CLI options");
     }
-    if (defined $cli_optshr->{pin_mode_user}) {
-        $config->{pin_mode_user} = $cli_optshr->{pin_mode_user};
-        sel(2, "Setting pin_mode_user '$cli_optshr->{pin_mode_user}' from CLI options");
+    if (defined $cli_optshro->{pin_mode_user}) {
+        $config->{pin_mode_user} = $cli_optshro->{pin_mode_user};
+        sel(2, "Setting pin_mode_user '$cli_optshro->{pin_mode_user}' from CLI options");
     }
-    if (defined $cli_optshr->{pin_mode_ast}) {
-        $config->{pin_mode_ast} = $cli_optshr->{pin_mode_ast};
-        sel(2, "Setting pin_mode_ast '$cli_optshr->{pin_mode_ast}' from CLI options");
+    if (defined $cli_optshro->{pin_mode_ast}) {
+        $config->{pin_mode_ast} = $cli_optshro->{pin_mode_ast};
+        sel(2, "Setting pin_mode_ast '$cli_optshro->{pin_mode_ast}' from CLI options");
     }
-    $config->{_cli_pin_shims}     = $cli_optshr->{pin_shims}     if defined $cli_optshr->{pin_shims};
-    $config->{_cli_pin_mode_sys}  = $cli_optshr->{pin_mode_sys}  if defined $cli_optshr->{pin_mode_sys};
-    $config->{_cli_pin_mode_user} = $cli_optshr->{pin_mode_user} if defined $cli_optshr->{pin_mode_user};
-    $config->{_cli_pin_mode_ast}  = $cli_optshr->{pin_mode_ast}  if defined $cli_optshr->{pin_mode_ast};
+    $config->{_cli_pin_shims}     = $cli_optshro->{pin_shims}     if defined $cli_optshro->{pin_shims};
+    $config->{_cli_pin_mode_sys}  = $cli_optshro->{pin_mode_sys}  if defined $cli_optshro->{pin_mode_sys};
+    $config->{_cli_pin_mode_user} = $cli_optshro->{pin_mode_user} if defined $cli_optshro->{pin_mode_user};
+    $config->{_cli_pin_mode_ast}  = $cli_optshro->{pin_mode_ast}  if defined $cli_optshro->{pin_mode_ast};
 
     $self->{effective_config} = $config;
     return $config;
 }
 
-sub _resolve_session_name {
-    my ($self, $cli_optshr, $config) = @_;
+sub _resolve_session_name($self, $cli_optshr, $config) {
+    $cli_optshr ||= {};
 
     # CLI session takes precedence
     return $cli_optshr->{session} if defined $cli_optshr->{session} && $cli_optshr->{session} ne '';
@@ -139,8 +138,7 @@ sub _resolve_session_name {
     return 'default';
 }
 
-sub get_session_name {
-    my ($self) = @_;
+sub get_session_name($self) {
     return $self->{effective_config}->{session} // 'default';
 }
 
@@ -199,9 +197,7 @@ sub _load_session_config {
     return $yaml;
 }
 
-sub store_user_config {
-    my ($self, %opts) = @_;
-
+sub store_user_config($self, $optshr) {
     my $config_dir = $self->_get_config_dir();
     make_path($config_dir) unless -d $config_dir;
 
@@ -210,13 +206,13 @@ sub store_user_config {
     # Load existing config
     my $existing = $self->_load_user_config() || {};
 
-    for my $key (qw(session system_prompt system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
-        if (defined $opts{$key}) {
-            $existing->{$key} = $opts{$key};
+    for my $key (qw(session system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
+        if (defined $optshr->{$key}) {
+            $existing->{$key} = $optshr->{$key};
         }
     }
-    if (defined $opts{pin_shims}) {
-        $existing->{pin_shims} = $opts{pin_shims};
+    if (defined $optshr->{pin_shims}) {
+        $existing->{pin_shims} = $optshr->{pin_shims};
     }
 
     sel 1, "Saving user config as YAML at: $user_config_file";
@@ -224,7 +220,6 @@ sub store_user_config {
 }
 
 sub store_session_config($self, $optshr) {
-
     my $session_dir = $self->{storage}->get_session_dir($self->{session_name});
     make_path($session_dir) unless -d $session_dir;
 
@@ -237,26 +232,31 @@ sub store_session_config($self, $optshr) {
     $existing->{created} = time() unless exists $existing->{created};
 
     # If storing any system source, clear others in this scope
-    if (defined $optshr->{system_prompt} || defined $optshr->{system_file} || 
+    if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
         defined $optshr->{system_persona} || defined $optshr->{system}) {
         
         # Clear all system sources in session config
-        delete $existing->{system_prompt};
+        delete $existing->{system_string};
         delete $existing->{system_file}; 
         delete $existing->{system_persona};
         delete $existing->{system};
         
         # Set the new one
-        for my $key (qw(system_prompt system_file system_persona system)) {
+        for my $key (qw(system_string system_file system_persona system)) {
             $existing->{$key} = $optshr->{$key} if defined $optshr->{$key};
         }
     }
 
     # Update with new values
-    for my $key (qw(system_prompt system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
+    for my $key (qw(system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
         if (defined $optshr->{$key}) {
-            $existing->{$key} = $optshr->{$key};
-            sel 1, "Storing $key = $$optshr{$key} in session config";
+            if (($optshr->{$key} // '') eq '') {
+                sel 1, "Clearing $key in session config";
+                delete $existing->{$key};
+            } else {
+                $existing->{$key} = $optshr->{$key};
+                sel 1, "Storing $key = $$optshr{$key} in session config";
+            }
         }
     }
     if (defined $optshr->{pin_shims}) {

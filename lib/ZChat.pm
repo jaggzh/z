@@ -56,7 +56,7 @@ sub new {
     );
 
     # Load effective configuration
-    $self->_load_config(%opts);
+    $self->_load_config(\%opts);
     $self->{session_name} = $self->{config}->get_session_name();
 
     $self->{pin_mgr} = ZChat::Pin->new(
@@ -114,23 +114,23 @@ sub store_shell_config {
 #     return { ok=>1, session=>$sn };
 # }
 
-sub _load_config {
-    my ($self, $optshr) = @_;
-    $optshr ||= {};
+sub _load_config($self, $optshro=undef) {
+    $optshro ||= {};
 
     my $config = $self->{config}->load_effective_config( {
-        preset => $optshr->{preset},
-        system_prompt => $optshr->{system_prompt},
-        system_file => $optshr->{system_file},
-        pin_shims => $optshr->{pin_shims},
-        pin_sys_mode => $optshr->{pin_sys_mode},
+        system_string => $optshro->{system_string},
+        system_file => $optshro->{system_file},
+        system_persona => $optshro->{system_persona},
+        system => $optshro->{system},
+        pin_shims => $optshro->{pin_shims},
+        pin_sys_mode => $optshro->{pin_sys_mode},
 	} );
 }
 
 # This is old. I'm including it only because we had some more messages
 # in it good for diags but i need to maybe get those into ->query()
-sub _build_messages($self, $user_input, $optshr->=undef) {
-    $optshr-> ||= {};
+sub _build_messages($self, $user_input, $optshro=undef) {
+    $optshro ||= {};
 
     my @messages;
 
@@ -376,10 +376,14 @@ sub _get_system_content {
     }
     elsif ($source eq 'persona') {
         my $ppath = $self->_resolve_persona_path($value);
-        sel(2, "persona resolved => $ppath");
-        $content = read_file($ppath);
-        die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';
-        sel(2, "Loaded persona content length: " . length($content));
+        if (!defined $ppath) {
+			swarnl 2, "persona was NOT resolved to a path"
+		} else {
+			sel(2, "persona resolved => $ppath");
+			$content = read_file($ppath);
+			die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';
+			sel(2, "Loaded persona content length: " . length($content));
+		}
     }
 
     # Render Xslate variables if present (no concatenation)
@@ -439,10 +443,10 @@ sub _manage_context {
 }
 
 # Pin management methods
-sub pin($self, $content, $optshr=undef) {
-    $optshr-> ||= {};
+sub pin($self, $content, $optshro=undef) {
+    $optshro ||= {};
     sel 3, "Z->pin(): Adding pin";
-    return $self->{pin_mgr}->add_pin($content, $optshr->);
+    return $self->{pin_mgr}->add_pin($content, $optshro);
 }
 
 sub list_pins {
@@ -471,9 +475,7 @@ sub get_session_name {
     return $self->{config}->get_session_name();
 }
 
-
-sub store_user_config {
-    my ($self, $optshr) = @_;
+sub store_user_config($self, $optshr) {
     return $self->{config}->store_user_config($optshr);
 }
 
@@ -486,10 +488,7 @@ sub history { $_[0]{history} }
 
 sub system  { $_[0]{system_prompt} }
 
-sub set_thought {
-    my ($self, $optshr) = @_;
-    $optshr ||= {};
-
+sub set_thought($self, $optshr) {
     # Handle conflicts first
     if (defined $optshr->{mode} && defined $optshr->{pattern}) {
         if ($optshr->{mode} eq 'disabled' && $optshr->{pattern}) {
@@ -521,8 +520,7 @@ sub set_thought {
         else {
             die "Invalid thought mode '$$optshr{mode}' - must be 'auto', 'enabled', or 'disabled'\n";
         }
-    }
-    elsif (defined $optshr->{pattern}) {
+    } elsif (defined $optshr->{pattern}) {
         # Pattern provided without mode - assume enabled
         if (($optshr->{pattern} // '') =~ /^\s*$/) {
             warn "Empty or whitespace-only thought pattern provided - thought filtering disabled\n";
@@ -655,30 +653,51 @@ sub query($self, $user_text, $optshro=undef) {
         unshift @messages, { role => 'system', content => $system_content };
     }
 
-    my $raw_response = '';
+    my $response_text = '';
+    my $response_metadata = {};
 
     if ($should_stream) {
         my $cb = sub ($piece) {
-            $raw_response .= $piece;
+            $response_text .= $piece;
             if ($on_chunk) {
                 $on_chunk->($piece);
             } elsif ($print_fh) {
                 print $print_fh $piece;
             }
         };
-        $self->{core}->complete_request(\@messages, {
+        my $result = $self->{core}->complete_request(\@messages, {
             stream => 1,
             on_chunk => $cb,
             fallbacks_ok => $self->{_fallbacks_ok}
         });
+        
+        # Extract content and metadata from result
+        $response_text = $result->{content} if ref($result) eq 'HASH';
+        $response_metadata = $result->{metadata} || {} if ref($result) eq 'HASH';
+        
+        # If old API (just returns string), handle gracefully
+        if (ref($result) ne 'HASH') {
+            $response_text = $result;
+            $response_metadata = {};
+        }
     } else {
-        $raw_response = $self->{core}->complete_request(\@messages, {
+        my $result = $self->{core}->complete_request(\@messages, {
             stream => 0,
             fallbacks_ok => $self->{_fallbacks_ok}
         });
+        
+        # Extract content and metadata
+        if (ref($result) eq 'HASH') {
+            $response_text = $result->{content};
+            $response_metadata = $result->{metadata} || {};
+        } else {
+            # Old API compatibility
+            $response_text = $result;
+            $response_metadata = {};
+        }
 
         # Apply thought filtering to complete response
-        my $filtered_response = $self->_apply_thought_filter($raw_response);
+        my $filtered_response = $self->_apply_thought_filter($response_text);
 
         # Output the filtered result
         if ($print_fh && !$on_chunk) {
@@ -689,18 +708,21 @@ sub query($self, $user_text, $optshro=undef) {
         }
 
         # Use filtered version for return and storage
-        $raw_response = $filtered_response;
+        $response_text = $filtered_response;
     }
-    if ($raw_response !~ /\n$/) {
+    
+    if ($response_text !~ /\n$/) {
         print $print_fh "\n";
     }
 
-    # Store in history
-    $self->{history}->append('user', $user_text);
-    $self->{history}->append('assistant', $raw_response);
+    # Store in history with metadata
+    $self->{history}->append('user', $user_text, {
+        request_time => $response_metadata->{request_time} || time,
+    });
+    $self->{history}->append('assistant', $response_text, $response_metadata);
     $self->{history}->save();
 
-    return $raw_response;
+    return $response_text;
 }
 
 sub set_allow_fallbacks {
@@ -763,9 +785,8 @@ sub _validate_print_opt($target) {
     return $print_fh;
 }
 
-sub history_owrite_last {
-    my ($self, @args) = @_;
-    $self->{history}->owrite_last(@args);
+sub history_owrite_last($self, $payload, $optshro=undef) {
+    $self->{history}->owrite_last($payload, $optshro); # Pass $optshro without ||= {}
     $self->{history}->save();
     return $self;
 }
@@ -798,7 +819,7 @@ ZChat - Perl interface to LLM chat completions with session management
     my $pins = $z->list_pins();
 
     # Configuration storage. old.. needs updating
-    $z->store_user_config(preset => "default");
+    $z->store_user_config({ preset => "default" });
     $z->store_session_config({preset => "coding-assistant"});
 
 =head1 DESCRIPTION

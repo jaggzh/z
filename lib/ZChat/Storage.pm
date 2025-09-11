@@ -96,18 +96,12 @@ sub load_history {
     
     return [] unless $history && ref($history) eq 'ARRAY';
     
-    # Convert to message format if needed
-    my @messages;
-    for my $entry (@$history) {
-        if (exists $entry->{user}) {
-            push @messages, { role => 'user', content => $entry->{user} };
-        }
-        if (exists $entry->{assistant}) {
-            push @messages, { role => 'assistant', content => $entry->{assistant} };
-        }
+    # Ensure IDs
+    for my $i (0..$#$history) {
+        $history->[$i]{id} ||= $i + 1;
     }
     
-    return \@messages;
+    return $history;
 }
 
 sub save_history {
@@ -122,25 +116,13 @@ sub save_history {
     
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
     
-    # Convert from message format if needed
-    my @entries;
-    my $current_entry = {};
-    
-    for my $msg (@$history) {
-        if ($msg->{role} eq 'user') {
-            # Start new entry
-            push @entries, $current_entry if keys %$current_entry;
-            $current_entry = { user => $msg->{content} };
-        } elsif ($msg->{role} eq 'assistant') {
-            $current_entry->{assistant} = $msg->{content};
-        }
+    # Ensure sequential IDs
+    for my $i (0..$#$history) {
+        $history->[$i]{id} = $i + 1;
     }
     
-    # Add final entry
-    push @entries, $current_entry if keys %$current_entry;
-    
     sel 1, "Saving history to: $history_file";
-    write_json_file($history_file, \@entries, { min=>1 });
+    write_json_file($history_file, $history, { min=>1 });
 }
 
 sub append_to_history {
@@ -154,17 +136,27 @@ sub append_to_history {
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
     
     # Load existing history
-    my $history = read_json_file($history_file);
-    $history = [] unless ref($history) eq 'ARRAY';  # Ensure it's always an array ref
+    my $history = $self->load_history($session_name);
     
-    # Add new entry
+    # Add new messages
+    my $next_id = @$history ? ($history->[-1]{id} || 0) + 1 : 1;
+    
     push @$history, {
-        user => $user_input,
-        assistant => $assistant_response,
+        role => 'user',
+        content => $user_input,
+        ts => time,
+        id => $next_id,
+    };
+    
+    push @$history, {
+        role => 'assistant', 
+        content => $assistant_response,
+        ts => time,
+        id => $next_id + 1,
     };
     
     sel 1, "Appending to history file: $history_file";
-    return write_json_file($history_file, $history, { min=>1 });
+    return $self->save_history($session_name, $history);
 }
 
 sub wipe_history {

@@ -102,7 +102,7 @@ my ($opt, $usage) = describe_options(
     [ 'set-pproc=i',        "Override parent ID for --store-pproc/--sp, if you think you know better, but when our SID+PPID fail to match you only have yourself to blame." ],
     [],
     [ 'System Prompt:' ],
-    [ 'system-str|sstr=s', "Set system prompt as a literal string (highest explicit source after file)" ],
+    [ 'system-string|system-str|sstr=s', "Set system prompt as a literal string (highest explicit source after file)" ],
     [ 'system-file|sfile=s', "Set system prompt from a file (relative paths allowed)" ],
     [ 'system-persona|spersona|persona=s', "Set system prompt by persona name (resolved by persona tool)" ],
     [ 'system|sys|s=s',     "Auto-resolve through -file then -persona (but does NOT accept a string)" ],
@@ -267,31 +267,47 @@ if ($opt->image) {
     $use_images = 1;
 }
 
-my $zchat;
+my $zchat = ZChat->new(
+    session => $opt->session // '',
+    verbose => $verbose,
+    override_pproc => $opt->set_pproc,
+);
 
 # Apply configuration/storage changes early (before any blocking/editor work)
 if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
-    $zchat = ZChat->new(
-        session => $opt->session // '',
-        verbose => $verbose,
-        override_pproc => $opt->set_pproc,
-    );
-    
     my %store_opts;
-    $store_opts{session} = $opt->session if defined $opt->session;
-    $store_opts{system_string}  = $opt->system_str if defined $opt->system_str;
-    $store_opts{system_file} = $opt->system_file if defined $opt->system_file;
-    $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
-    $store_opts{system} = $opt->system if defined $opt->system;
     
-    if ($opt->store_user)   {
+    # System prompt options
+    $store_opts{system_string}  = $opt->system_string     if defined $opt->system_string;
+    $store_opts{system_file}    = $opt->system_file    if defined $opt->system_file;
+    $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
+    $store_opts{system}         = $opt->system         if defined $opt->system;
+    
+    # Pin options
+    $store_opts{pin_shims}      = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
+    $store_opts{pin_tpl_user}   = $opt->pin_tpl_user   if defined $opt->pin_tpl_user;
+    $store_opts{pin_tpl_ast}    = $opt->pin_tpl_ast    if defined $opt->pin_tpl_ast;
+    $store_opts{pin_mode_sys}   = $opt->pin_mode_sys   if defined $opt->pin_mode_sys;
+    $store_opts{pin_mode_user}  = $opt->pin_mode_user  if defined $opt->pin_mode_user;
+    $store_opts{pin_mode_ast}   = $opt->pin_mode_ast   if defined $opt->pin_mode_ast;
+    
+    if ($opt->store_user) {
+        # User config can store session name
+        $store_opts{session} = $opt->session if defined $opt->session;
         $zchat->store_user_config(\%store_opts);
+        sel(1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } sort keys %store_opts)) if %store_opts;
         $non_query_acts++;
     }
+    
     if ($opt->store_session) {
-        $zchat->store_session_config(\%store_opts);
+        # Session config never stores its own session name
+        my %session_opts = %store_opts;
+        delete $session_opts{session};
+        $zchat->store_session_config(\%session_opts);
+        sel(1, "Stored session config: ", join(", ", sort keys %session_opts)) if %session_opts;
         $non_query_acts++;
     }
+    
     if ($opt->store_pproc) {
         # Only store session name for shell scope
         my %shell_opts = ( session => ($opt->session // $zchat->get_session_name()) );
@@ -303,20 +319,13 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     # We still have wiping and other things that might need to be done. Don't exit
     # # Exit early if no query provided
     # exit unless defined $uprompt || $opt->interactive;
-} else {
-    # Initialize ZChat
-    $zchat = ZChat->new(
-        session => $opt->session // '',
-        verbose => $verbose,
-        override_pproc => $opt->set_pproc,
-    );
 }
 
 $zchat->set_print(1); # Module default is silent.
 
 # System prompt setters from CLI (provenance=CLI)
 if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, { scope => 'CLI' }) }
-if (defined $opt->system_str)     { $zchat->system->set_str($opt->system_str, { scope => 'CLI' }) }
+if (defined $opt->system_string)     { $zchat->system->set_str($opt->system_string, { scope => 'CLI' }) }
 if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, { scope => 'CLI' }) }
 if (defined $opt->system)         { $zchat->system->set_auto($opt->system, { scope => 'CLI' }) }
 
@@ -342,6 +351,15 @@ else { $zchat->history->set_mode('rw') }
 if ($opt->wipe) {
     $zchat->history->wipe();
     sel 1, "${yel}Conversation history wiped.$rst";
+    $non_query_acts++;
+} elsif ($opt->wipe_old) { # Wipe old messages
+    $zchat->history->load();
+    my $removed_count = eval { $zchat->history->wipe_old($opt->wipe_old) };
+    if ($@) {
+        die "${bred}ERROR: $@$rst";
+    }
+    $zchat->history->save();
+    sel 1, "${yel}Removed $removed_count messages older than $opt->wipe_old$rst";
     $non_query_acts++;
 }
 
@@ -627,44 +645,6 @@ if ($opt->wipe) {
     # exit unless defined $uprompt; # Other options might still be requested
 }
 
-# Storage operations (These come BEFORE being blocked by edit history)
-if ($opt->store_user) {
-    my %store_opts;
-    $store_opts{session} = $opt->session if $opt->session;
-
-    $store_opts{system_prompt}  = $opt->system_str  if defined $opt->system_str;
-    $store_opts{system_file}    = $opt->system_file if defined $opt->system_file;
-    $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
-
-    $store_opts{pin_shims}   = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
-    $store_opts{pin_sys_mode}= $opt->pin_sys_mode if defined $opt->pin_sys_mode;
-
-    $zchat->store_user_config(%store_opts);
-    sel(1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } sort keys %store_opts)) if %store_opts;
-    # exit unless defined $uprompt;
-    $non_query_acts++;
-}
-
-if ($opt->store_session) {
-    my %store_opts;
-
-    $store_opts{system_prompt}  = $opt->system_str  if defined $opt->system_str;
-    $store_opts{system_file}    = $opt->system_file if defined $opt->system_file;
-    $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
-
-    $store_opts{pin_shims}      = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
-    $store_opts{pin_tpl_user}   = $opt->pin_tpl_user if defined $opt->pin_tpl_user;
-    $store_opts{pin_tpl_ast}    = $opt->pin_tpl_ast if defined $opt->pin_tpl_ast;
-    $store_opts{pin_mode_sys}   = $opt->pin_mode_sys if defined $opt->pin_mode_sys;
-    $store_opts{pin_mode_user}  = $opt->pin_mode_user if defined $opt->pin_mode_user;
-    $store_opts{pin_mode_ast}   = $opt->pin_mode_ast if defined $opt->pin_mode_ast;
-
-    $zchat->store_session_config(\%store_opts);
-    say "Stored session config: " . join(", ", sort keys %store_opts) if %store_opts;
-    $non_query_acts++;
-    # exit unless defined $uprompt;
-}
-
 # Overwrite last message for a specific role (does not affect pins)
 if (my $role_to_overwrite = $opt->owrite_last) {
     die "Input-only was selected (-I). Overwriting it makes no sense.\n" if $opt->input_only;
@@ -681,7 +661,7 @@ if (my $role_to_overwrite = $opt->owrite_last) {
     $zchat->history->load();
     die "Cannot --owrite-last: conversation history is empty.\n" if $zchat->history->empty();
     
-    my $last = $zchat->history->get_last(role => $role_to_overwrite);
+    my $last = $zchat->history->get_last({role => $role_to_overwrite});
     die "Cannot --owrite-last: No '$role_to_overwrite' message found to overwrite.\n" unless $last;
     
     $zchat->history_owrite_last($uprompt, { role => $role_to_overwrite });

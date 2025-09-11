@@ -360,6 +360,7 @@ $zchat->set_print(1); # Module default is silent.
 if (defined $opt->system_file)    { $zchat->system->set_file($opt->system_file, { scope => 'CLI' }) }
 if (defined $opt->system_string)     { $zchat->system->set_str($opt->system_string, { scope => 'CLI' }) }
 if (defined $opt->system_persona) { $zchat->system->set_persona($opt->system_persona, { scope => 'CLI' }) }
+$DB::single=1;
 if (defined $opt->system)         { $zchat->system->set_auto($opt->system, { scope => 'CLI' }) }
 
 # Thought removal policy from CLI

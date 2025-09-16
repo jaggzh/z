@@ -18,7 +18,9 @@ sub new {
     my ($class, %opts) = @_;
 
     my $self = {
-        api_base => ($opts{api_base} // $ENV{LLM_API_URL} // 'http://127.0.0.1:8080'),
+        api_base => _resolve_api_base($opts{api_base}),
+        api_key  => _first_defined($opts{api_key}, _resolve_api_key()),
+        backend  => _resolve_backend($opts{backend}),
         model_info => undef,
         model_info_loaded => 0,
     };
@@ -84,13 +86,19 @@ sub complete_request($self, $messages, $optshro=undef) {
 }
 
 sub _stream_completion($self, $data, $model_name, $optshro=undef) {
-	$optshro ||= {};
+    $optshro ||= {};
     my $on_chunk = $optshro->{on_chunk};
 
     my $ua = Mojo::UserAgent->new(max_response_size => 0);
+
+    my %headers = ('Content-Type' => 'application/json');
+    if ($self->{api_key}) {
+        $headers{'Authorization'} = "Bearer $self->{api_key}";
+    }
+
     my $tx = $ua->build_tx(
-        POST => "$self->{api_base}/v1/chat/completions",
-        { 'Content-Type' => 'application/json' },
+        POST => "$self->{api_base}/chat/completions",
+        \%headers,
         json => $data
     );
 
@@ -173,9 +181,15 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
 
     my $start_time = time;
     my $ua = Mojo::UserAgent->new();
+
+    my %headers = ('Content-Type' => 'application/json');
+    if ($self->{api_key}) {
+        $headers{'Authorization'} = "Bearer $self->{api_key}";
+    }
+
     my $tx = $ua->post(
-        "$self->{api_base}/v1/chat/completions",
-        { 'Content-Type' => 'application/json' },
+        "$self->{api_base}/chat/completions",
+        \%headers,
         json => $data
     );
 
@@ -213,15 +227,41 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
 
 sub get_model_info {
     my ($self) = @_;
+	# Undefined backend will try llama.cpp then ollama
+	# "" disables the hits entirely
 
+    $DB::single=1;
     return $self->{model_info} if $self->{model_info_loaded};
 
-    my $url = "$self->{api_base}/props";
-    my $ua = LWP::UserAgent->new(timeout => 5);
+	# Backend was disabled by caller (ie. set to '')
+	return undef if exists $self->{backend} && defined $self->{backend} && $self->{backend} eq '';
 
+    my $backend = $self->{backend};
+    my $url;
+
+	# If it's undefined we try each...
+    if (!defined $backend || $backend eq 'llama.cpp') {
+        $url = $self->{api_base};
+        $url =~ s{/v1$}{};
+        $url .= "/props";
+    } elsif (!defined $backend || $backend eq 'ollama') {
+        $url = $self->{api_base};
+        $url =~ s{/v1$}{};
+        $url .= "/api/show";
+    } else {
+    	$backend //= "Undefined"; 
+        swarnl(0, "Unknown backend '$backend'. Use 'llama.cpp', 'ollama', or leave unset.");
+        return undef;
+    }
+
+	sel 1, "get_model_info() hitting $url";
+    my $ua = LWP::UserAgent->new(timeout => 5);
     my $response = $ua->get($url);
     unless ($response->is_success) {
-        die "Failed to get model props: " . $response->status_line;
+        sel(2, "Model info fetch failed from $url: " . $response->status_line);
+        $self->{model_info_loaded} = 1;
+        $self->{model_info} = undef;
+        return undef;
     }
 
     my $data = decode_json($response->decoded_content);
@@ -244,8 +284,15 @@ sub _extract_model_name {
 sub get_n_ctx {
     my ($self) = @_;
 
+    my $def_n_ctx = 1024;
     my $props = $self->get_model_info();
-    return $props->{default_generation_settings}{n_ctx} || 8192;
+    return $def_n_ctx unless $props;
+
+    if (($self->{backend}//'') eq 'ollama') { # '' to prevent error
+        return $props->{model_info}{num_ctx} // $def_n_ctx;
+    }
+
+    return $props->{default_generation_settings}{n_ctx} // $def_n_ctx;
 }
 
 sub tokenize {
@@ -297,6 +344,15 @@ sub estimate_message_tokens {
     return $total;
 }
 
+sub get_model_name {
+    my ($self) = @_;
+
+    my $props = $self->get_model_info();
+    return '' unless $props;
+
+    return $self->_extract_model_name($props);
+}
+
 # Test connection
 sub ping {
     my ($self) = @_;
@@ -322,6 +378,56 @@ sub health_check {
         code => $response->code,
         message => $response->message,
     };
+}
+
+# Connection URL helpers
+sub _first_defined {
+    my @vals = @_;
+    for my $v (@vals) {
+        return $v if defined($v) && $v ne '';
+    }
+    return undef;
+}
+
+sub _normalize_base_with_v1 {
+    my ($u) = @_;
+    $u ||= 'http://127.0.0.1:8080';
+    $u =~ s{\s+}{}g;
+    $u = "http://$u" unless $u =~ m{^https?://}i;
+    $u =~ s{/$}{};
+    $u =~ s{/v1$}{};
+    return "$u/v1";
+}
+
+sub _resolve_backend {
+    my ($opt_val) = @_;
+    return _first_defined($opt_val, $ENV{ZCHAT_BACKEND});
+}
+
+sub _resolve_api_base {
+    my ($opt_val) = @_;
+    my $env_val = _first_defined(
+        $ENV{OPENAI_BASE_URL},
+        $ENV{OPENAI_API_BASE},
+        $ENV{OPENAI_URL},
+        $ENV{LLAMA_URL},
+        $ENV{LLAMA_API_URL},
+        $ENV{LLAMACPP_SERVER},
+        $ENV{LLAMA_CPP_SERVER},
+        $ENV{LLM_API_URL},
+    );
+    if (!$opt_val && $ENV{LLM_API_URL}) {
+        sel 2, "Note: LLM_API_URL is deprecated; use OPENAI_BASE_URL or LLAMA_API_URL instead.";
+    }
+    return _normalize_base_with_v1(_first_defined($opt_val, $env_val));
+}
+
+sub _resolve_api_key {
+    return _first_defined(
+        $ENV{OPENAI_API_KEY},
+        $ENV{LLAMA_API_KEY},
+        $ENV{AZURE_OPENAI_API_KEY},
+    );
 }
 
 1;

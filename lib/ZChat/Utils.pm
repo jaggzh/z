@@ -37,6 +37,9 @@ our @EXPORT_OK = qw(
 	sokl swarnl serrl sultraerrl
 	pager pagerdone
 	show_help_file
+	$a_stat_actline $a_stat_actval $a_stat_acttag $a_stat_inactline
+	$a_stat_exists
+	$a_stat_undeftag
 );
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
@@ -56,9 +59,17 @@ my $PIPE_DELIM_RE = qr/(?<!\\)(?:\\\\){,20}\K\|\|\|/;
 # Styles (24-bit color + attributes). Avoid 8-bit $b* colors; $rst remains OK.
 # Example given: strong red, bold+italic for errors.
 my $a_err      = a24fg(255,158,158) . $aa_boit;
-my $a_warn     = a24fg(255,210,64)  . $aa_bo;                        # vivid yellow, bold
-my $a_ok       = a24fg(144,238,144) . $aa_bo;                        # light green, bold
+my $a_warn     = a24fg(255,210,64)  . $aa_bo;            # vivid yellow, bold
+my $a_ok       = a24fg(144,238,144) . $aa_bo;            # light green, bold
 my $a_ultraerr = a24bg(100,0,0)     . a24fg(255,255,255) . $aa_boit; # white on toned-down strong red
+
+our $a_stat_actline   = a24bg(0,50,100) . a24fg(255,255,255);   # blue bg, white text  
+our $a_stat_actval    = a24fg(255,100,255) . $aa_bo;     # b magenta, bold
+our $a_stat_acttag    = a24fg(100,255,100) . $aa_bo;     # b green, bold
+our $a_stat_inactline = "";                              # normal text
+our $a_stat_exists    = a24fg(0,178,0);                   # bright green, bold
+our $a_stat_undeftag  = a24fg(100,100,100);              # gray
+
 
 sub set_verbose($l) { $verbose = $l // 0 }
 sub get_verbose { $verbose }

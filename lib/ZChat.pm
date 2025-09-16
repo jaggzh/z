@@ -19,6 +19,7 @@ use ZChat::Pin;
 use ZChat::Utils ':all';
 use ZChat::History;
 use ZChat::SystemPrompt;
+use ZChat::ansi;
 
 our $VERSION = '1.1.0';
 
@@ -275,6 +276,7 @@ sub _resolve_persona_path {
     return undef unless @files;
 
     my $persona_file;
+    $DB::single=1;
     if (@files > 1) {
         die "  REFUSING: Multiple persona files found for '$name':"
             if ! $self->{_fallbacks_ok};
@@ -790,6 +792,131 @@ sub history_owrite_last($self, $payload, $optshro=undef) {
     $self->{history}->save();
     return $self;
 }
+
+# Improved show_status method for ZChat with better error handling:
+
+sub show_status {
+    my ($self, $verbose_level) = @_;
+    $verbose_level //= 0;
+    
+    my $def_abbr_sysstr = 30;
+    
+    # Load the configuration if not already loaded
+    $self->{config}->load_effective_config();
+    
+    my $status_info = eval { $self->{config}->get_status_info() };
+    if ($@) {
+        serr "Failed to collect status information: $@";
+        return;
+    }
+    
+    # Header
+    say "${a_stat_actline}ZChat Configuration Status$rst";
+    say "Session: " . $self->get_session_name();
+    say "";
+    
+    say "${a_stat_actline}* Precedence:$rst";
+    
+    # System prompt precedence
+    $self->_show_precedence_section("System prompt", 
+        $status_info->{precedence}{system_prompt}, $verbose_level, $def_abbr_sysstr);
+    
+    # Session precedence  
+    $self->_show_precedence_section("Session",
+        $status_info->{precedence}{session}, $verbose_level, $def_abbr_sysstr);
+    
+    say "${a_stat_actline}* Sources:$rst";
+    
+    # Sources view
+    for my $source_name (qw(CLI SHELL SESSION USER SYSTEM)) {
+        my $source_data = $status_info->{sources}{$source_name};
+        next unless $source_data && keys %$source_data;
+        
+        my $location = $status_info->{file_locations}{$source_name} || '';
+        say "  - $source_name" . ($location ? ": $location" : "");
+        
+        # Show file existence status for file-based sources
+        if ($source_name =~ /^(SESSION|USER|SHELL)$/ && $location && $location ne 'system defaults') {
+            my $exists = -e $location ? "${a_stat_exists}[exists]$rst" : "${a_stat_undeftag}[missing]$rst";
+            say "    File: $exists";
+        }
+        
+        for my $key (sort keys %$source_data) {
+            my $value = $source_data->{$key};
+            
+            # Truncate long values unless -vv  
+            if (($key eq 'system_string' || length($value) > 50) && $verbose_level < 2) {
+                $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
+            }
+            
+            # Determine if this setting is actually being used
+            my $is_used = $self->{config}->_is_setting_used($source_name, $key, $status_info);
+            my $usage_tag = $is_used ? "${a_stat_acttag}[used]$rst" : "${a_stat_undeftag}[unused]$rst";
+            
+            say "    $key: '$value' $usage_tag";
+        }
+        say "";
+    }
+}
+
+sub _show_precedence_section {
+    my ($self, $section_name, $precedence_items, $verbose_level, $def_abbr_sysstr) = @_;
+    
+    return unless $precedence_items && @$precedence_items;
+    
+    say "  - $section_name";
+    my $indent = "   ";
+    
+    for my $item (@$precedence_items) {
+        my $active_marker = $item->{active} ? 
+            "${a_stat_acttag}[active]$rst" : "${a_stat_undeftag}[unused]$rst";
+        my $value = $item->{value} // 'undef';
+        
+        # Truncate system strings unless -vv
+        if ($item->{type} eq 'system_string' && $verbose_level < 2) {
+            $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
+        }
+        
+        # Format the line based on whether it's active
+        my $arrow = $item->{active} ? "<-" : " <-";
+        my $source_info = "$item->{source}";
+        $source_info .= "($item->{type})" if $item->{type} ne 'session';
+        
+        if ($item->{active}) {
+            say "${indent}$arrow $source_info = \"${a_stat_actval}${value}$rst\" $active_marker";
+        } else {
+            say "${indent}$arrow $source_info = '$value' $active_marker";
+        }
+        
+        # Show location for non-CLI sources  
+        if ($item->{location} && $item->{location} ne 'command line' && $item->{location} ne 'system defaults') {
+            say "${indent}    Loc: $item->{location}";
+        }
+        
+        $indent .= " ";
+    }
+    say "";
+}
+
+# Add this validation method to ZChat::Config:
+
+sub validate_status_display {
+    my ($self) = @_;
+    
+    # Check if session directory exists
+    my $session_dir = $self->_get_session_dir();
+    my $session_exists = $session_dir && -d $session_dir;
+    
+    # Check if required config files are readable
+    my $user_config_readable = -r $self->_get_user_config_path();
+    
+    return {
+        session_dir_exists => $session_exists,
+        user_config_readable => $user_config_readable,
+        current_session => $self->get_session_name(),
+    };
+}
+
 
 1;
 

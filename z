@@ -98,7 +98,7 @@ my ($opt, $usage) = describe_options(
     [],
     [ 'store-user|su|S',    "Store session in user global config" ],
     [ 'store-session|ss',   "Store in current session config" ],
-    [ 'store-pproc|sp',     "Save ONLY session name for current shell (parent process scope). This uses SID+PPID in POSIX systems, and requires POSIX::2008." ],
+    [ 'store-pproc|store-shell|sp',  "Save session name and system-prompt settings tied to your current shell. This uses SID+PPID in POSIX systems (and uses the /proc/ file system to obtain the group leader)" ],
     [ 'set-pproc=i',        "Override parent ID for --store-pproc/--sp, if you think you know better, but when our SID+PPID fail to match you only have yourself to blame." ],
     [],
     [ 'System Prompt:' ],
@@ -109,7 +109,7 @@ my ($opt, $usage) = describe_options(
     [],
     [ 'History:' ],
     [ 'wipe|w',             "Wipe conversation history" ],
-    [ 'wipe-old|wo=s',      "Wipe older than {FLOAT TIME}[smhdwMyY] (e.g. 1.5h)" ],
+    [ 'wipeold|wipeexp|we|wo=s',  "Wipe/expire msgs older than {FLOAT TIME}[smhdwMyY] (e.g. 1.5h)" ],
     [ 'no-history|H',       "Do not use history (no load, no store)" ],
     [ 'input-only|I',       "Use history BUT do not write to it" ],
     [ 'edit-hist|eh|E',     "Edit history in $editor" ],
@@ -120,6 +120,7 @@ my ($opt, $usage) = describe_options(
     [ 'Utility:' ],
     [ 'list-sys|sys-list|L', "List available file and 'persona'-based system prompts." ],
     [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
+    [ 'status|stat',        "Show current configuration status and precedence" ],
     [],
     [ 'Message pinning (see --help-pins):' ],
     [ 'pin=s@',             "Add pinned message(s)" ],
@@ -347,10 +348,24 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     }
     
     if ($opt->store_pproc) {
-        # Only store session name for shell scope
+        # Shell config can store session name AND system prompt options
         my %shell_opts = ( session => ($opt->session // $zchat->get_session_name()) );
+        
+        # Add system prompt options if provided
+        $shell_opts{system_string}  = $opt->system_string  if defined $opt->system_string;
+        $shell_opts{system_file}    = $opt->system_file     if defined $opt->system_file;
+        $shell_opts{system_persona} = $opt->system_persona  if defined $opt->system_persona;
+        $shell_opts{system}         = $opt->system          if defined $opt->system;
+        
         $zchat->store_shell_config(\%shell_opts);
-        sel 1, "Saved session '$shell_opts{session}' for current shell";
+        
+        my @stored_items = ('session');
+        push @stored_items, 'system_string'  if defined $opt->system_string;
+        push @stored_items, 'system_file'    if defined $opt->system_file;
+        push @stored_items, 'system_persona' if defined $opt->system_persona;
+        push @stored_items, 'system'         if defined $opt->system;
+        
+        sel 1, "Saved " . join(', ', @stored_items) . " for current shell (session: '$shell_opts{session}')";
         $non_query_acts++;
     }
     
@@ -360,6 +375,8 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
 }
 
 $zchat->set_print(1); # Module default is silent.
+
+if ($opt->status) { $zchat->show_status($verbose); exit; }
 
 # This is redundant. zchat->new is handling this (or at least it should be)
 # Also, these aren't used for later resolution so they fail to serve their primary purpose anyway.
@@ -394,14 +411,14 @@ if ($opt->wipe) {
     $zchat->history->wipe();
     sel 1, "${yel}Conversation history wiped.$rst";
     $non_query_acts++;
-} elsif ($opt->wipe_old) { # Wipe old messages
+} elsif ($opt->wipeold) { # Wipe old messages
     $zchat->history->load();
-    my $removed_count = eval { $zchat->history->wipe_old($opt->wipe_old) };
+    my $removed_count = eval { $zchat->history->wipeold($opt->wipeold) };
     if ($@) {
         die "${bred}ERROR: $@$rst";
     }
     $zchat->history->save();
-    sel 1, "${yel}Removed $removed_count messages older than $opt->wipe_old$rst";
+    sel 1, "${yel}Removed $removed_count messages older than $opt->wipeold$rst";
     $non_query_acts++;
 }
 

@@ -83,6 +83,24 @@ sub resolve {
         return $self->_resolve_auto($cfg->{_cli_system}, 'CLI');
     }
     
+    # Check shell scope (new - between CLI and session)
+    if (defined $cfg->{system_file_shell}) {
+        sel(2, "Resolving shell system_file: $cfg->{system_file_shell}");
+        return { source => 'file', value => $cfg->{system_file_shell}, provenance => 'SHELL' };
+    }
+    if (defined $cfg->{system_string_shell}) {
+        sel(2, "Resolving shell system_string");
+        return { source => 'str', value => $cfg->{system_string_shell}, provenance => 'SHELL' };
+    }
+    if (defined $cfg->{system_persona_shell}) {
+        sel(2, "Resolving shell system_persona: $cfg->{system_persona_shell}");
+        return { source => 'persona', value => $cfg->{system_persona_shell}, provenance => 'SHELL' };
+    }
+    if (defined $cfg->{system_shell}) {
+        sel(2, "Resolving shell system (auto): $cfg->{system_shell}");
+        return $self->_resolve_auto($cfg->{system_shell}, 'SHELL');
+    }
+    
     # Check session scope
     if (defined $cfg->{system_file_session}) {
         sel(2, "Resolving session system_file: $cfg->{system_file_session}");

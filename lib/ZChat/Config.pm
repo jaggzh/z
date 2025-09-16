@@ -11,6 +11,7 @@ use Cwd qw(abs_path);
 use File::Path qw(make_path);
 use ZChat::ParentID qw(get_parent_id);
 use ZChat::Utils ':all';
+use ZChat::ansi;
 
 sub new {
     my ($class, %opts) = @_;
@@ -55,6 +56,13 @@ sub load_effective_config($self, $cli_optshro=undef) {
     my $shell_config = $self->_load_shell_config();
     if ($shell_config) {
         %$config = (%$config, %$shell_config);
+        
+        # Record source-specific copies for shell scope
+        $config->{system_file_shell}    = $shell_config->{system_file}    if defined $shell_config->{system_file};
+        $config->{system_string_shell}  = $shell_config->{system_string}  if defined $shell_config->{system_string};
+        $config->{system_persona_shell} = $shell_config->{system_persona} if defined $shell_config->{system_persona};
+        $config->{system_shell}         = $shell_config->{system}         if defined $shell_config->{system};
+        
         sel(2, "Loaded shell session config overrides");
     }
 
@@ -457,11 +465,358 @@ sub store_shell_config {
     my $temp_dir = (File::Spec->splitpath($shell_config_file))[1];
     make_path($temp_dir) unless -d $temp_dir;
     
-    # Only store session name for shell scope
-    my $config = { session => $optshr->{session} };
+    # Shell config can store session name AND system prompt options
+    my $config = {};
+    
+    # Always store session name
+    $config->{session} = $optshr->{session} if defined $optshr->{session};
+    
+    # Store system prompt options if provided
+    $config->{system_string}  = $optshr->{system_string}  if defined $optshr->{system_string};
+    $config->{system_file}    = $optshr->{system_file}    if defined $optshr->{system_file};
+    $config->{system_persona} = $optshr->{system_persona} if defined $optshr->{system_persona};
+    $config->{system}         = $optshr->{system}         if defined $optshr->{system};
     
     sel 1, "Saving shell session config: $shell_config_file";
     return $self->{storage}->save_yaml($shell_config_file, $config);
+}
+
+## STATUS routines
+
+sub get_status_info {
+    my ($self) = @_;
+    
+    my $cfg = $self->{effective_config};
+    my $info = {
+        precedence => {},
+        sources => {},
+        file_locations => {},
+    };
+    
+    # Build precedence chain for system prompt
+    $info->{precedence}{system_prompt} = $self->_build_system_prompt_precedence($cfg);
+    $info->{precedence}{session} = $self->_build_session_precedence($cfg);
+    
+    # Build sources view
+    $info->{sources} = $self->_build_sources_view($cfg);
+    
+    # File locations
+    $info->{file_locations} = $self->_get_file_locations();
+    
+    return $info;
+}
+
+sub _build_system_prompt_precedence {
+    my ($self, $cfg) = @_;
+    
+    my @chain;
+    my $active_found = 0;
+    
+    # CLI level (highest precedence)
+    if (defined $cfg->{_cli_system_file}) {
+        push @chain, {
+            source => 'CLI',
+            type => 'system_file', 
+            value => $cfg->{_cli_system_file},
+            active => !$active_found,
+            location => 'command line'
+        };
+        $active_found = 1;
+    }
+    if (defined $cfg->{_cli_system_string}) {
+        push @chain, {
+            source => 'CLI',
+            type => 'system_string',
+            value => $cfg->{_cli_system_string}, 
+            active => !$active_found,
+            location => 'command line'
+        };
+        $active_found = 1;
+    }
+    if (defined $cfg->{_cli_system_persona}) {
+        push @chain, {
+            source => 'CLI',
+            type => 'system_persona',
+            value => $cfg->{_cli_system_persona},
+            active => !$active_found, 
+            location => 'command line'
+        };
+        $active_found = 1;
+    }
+    if (defined $cfg->{_cli_system}) {
+        push @chain, {
+            source => 'CLI',
+            type => 'system',
+            value => $cfg->{_cli_system},
+            active => !$active_found,
+            location => 'command line' 
+        };
+        $active_found = 1;
+    }
+    
+    # Shell level (new - between CLI and SESSION)
+    for my $field (qw(system_file_shell system_string_shell system_persona_shell system_shell)) {
+        next unless defined $cfg->{$field};
+        my ($type) = $field =~ /^(.+)_shell$/;
+        push @chain, {
+            source => 'SHELL',
+            type => $type,
+            value => $cfg->{$field},
+            active => !$active_found,
+            location => $self->_get_shell_config_file()
+        };
+        $active_found = 1;
+    }
+    
+    # Session level
+    for my $field (qw(system_file_session system_string_session system_persona_session system_session)) {
+        next unless defined $cfg->{$field};
+        my ($type) = $field =~ /^(.+)_session$/;
+        push @chain, {
+            source => 'SESSION',
+            type => $type,
+            value => $cfg->{$field},
+            active => !$active_found,
+            location => $self->_get_session_config_path()
+        };
+        $active_found = 1;
+    }
+    
+    # User level  
+    for my $field (qw(system_file_user system_string_user system_persona_user system_user)) {
+        next unless defined $cfg->{$field};
+        my ($type) = $field =~ /^(.+)_user$/;
+        push @chain, {
+            source => 'USER',
+            type => $type, 
+            value => $cfg->{$field},
+            active => !$active_found,
+            location => $self->_get_user_config_path()
+        };
+        $active_found = 1;
+    }
+    
+    return \@chain;
+}
+
+sub _build_session_precedence {
+    my ($self, $cfg) = @_;
+    
+    my @chain;
+    my $active_found = 0;
+    
+    # CLI session
+    if (defined $cfg->{_cli_session}) {
+        push @chain, {
+            source => 'CLI',
+            type => 'session',
+            value => $cfg->{_cli_session},
+            active => !$active_found,
+            location => 'command line'
+        };
+        $active_found = 1;
+    }
+    
+    # SHELL (shell session)  
+    my $shell_config = $self->_load_shell_config();
+    if ($shell_config && $shell_config->{session}) {
+        push @chain, {
+            source => 'SHELL',
+            type => 'session',
+            value => $shell_config->{session},
+            active => !$active_found,
+            location => $self->_get_shell_config_file()
+        };
+        $active_found = 1;
+    }
+    
+    # User session
+    my $user_config = $self->_load_user_config();
+    if ($user_config && $user_config->{session}) {
+        push @chain, {
+            source => 'USER', 
+            type => 'session',
+            value => $user_config->{session},
+            active => !$active_found,
+            location => $self->_get_user_config_path()
+        };
+        $active_found = 1;
+    }
+    
+    # System default
+    push @chain, {
+        source => 'SYSTEM',
+        type => 'session', 
+        value => 'default',
+        active => !$active_found,
+        location => 'system defaults'
+    };
+    
+    return \@chain;
+}
+
+sub _build_sources_view {
+    my ($self, $cfg) = @_;
+    
+    my $sources = {};
+    
+    # CLI sources
+    my $cli = {};
+    $cli->{system_string} = $cfg->{_cli_system_string} if defined $cfg->{_cli_system_string};
+    $cli->{system_file} = $cfg->{_cli_system_file} if defined $cfg->{_cli_system_file};
+    $cli->{system_persona} = $cfg->{_cli_system_persona} if defined $cfg->{_cli_system_persona};
+    $cli->{system} = $cfg->{_cli_system} if defined $cfg->{_cli_system};
+    $cli->{session} = $cfg->{_cli_session} if defined $cfg->{_cli_session};
+    $sources->{CLI} = $cli if keys %$cli;
+    
+    # Shell sources
+    my $shell_config = $self->_load_shell_config();
+    if ($shell_config && keys %$shell_config) {
+        my $filtered = {};
+        for my $key (qw(system_string system_file system_persona system session)) {
+            $filtered->{$key} = $shell_config->{$key} if defined $shell_config->{$key};
+        }
+        $sources->{SHELL} = $filtered if keys %$filtered;
+    }
+    
+    # Session sources
+    my $session_config = $self->_load_session_config();
+    if ($session_config && keys %$session_config) {
+        my $filtered = {};
+        for my $key (qw(system_string system_file system_persona system)) {
+            $filtered->{$key} = $session_config->{$key} if defined $session_config->{$key};
+        }
+        $sources->{SESSION} = $filtered if keys %$filtered;
+    }
+    
+    # User sources  
+    my $user_config = $self->_load_user_config();
+    if ($user_config && keys %$user_config) {
+        my $filtered = {};
+        for my $key (qw(system_string system_file system_persona system session)) {
+            $filtered->{$key} = $user_config->{$key} if defined $user_config->{$key};
+        }
+        $sources->{USER} = $filtered if keys %$filtered;
+    }
+    
+    # System defaults
+    my $defaults = $self->_get_system_defaults();
+    $sources->{SYSTEM} = { session => $defaults->{session} };
+    
+    return $sources;
+}
+
+sub _get_file_locations {
+    my ($self) = @_;
+    
+    return {
+        SESSION => $self->_get_session_config_path(),
+        USER => $self->_get_user_config_path(), 
+        SHELL => $self->_get_shell_config_file(),
+        SYSTEM => 'built-in defaults'
+    };
+}
+
+sub _get_session_config_path {
+    my ($self) = @_;
+    return undef unless $self->{session_name};
+    my $session_dir = $self->_get_session_dir();
+    return File::Spec->catfile($session_dir, 'session.yaml');
+}
+
+sub _get_user_config_path {
+    my ($self) = @_;
+    my $config_dir = $self->_get_config_dir();
+    return File::Spec->catfile($config_dir, 'user.yaml');
+}
+
+# Add this method to ZChat 
+
+sub show_status {
+    my ($self, $verbose_level) = @_;
+    $verbose_level //= 0;
+    
+    my $def_abbr_sysstr = 30;
+    
+    my $status_info = $self->{config}->get_status_info();
+    
+    say "${a_stat_actline}* Precedence:$rst";
+    
+    # System prompt precedence
+    say "  - System prompt";
+    my $indent = "   ";
+    for my $item (@{$status_info->{precedence}{system_prompt}}) {
+        my $active_marker = $item->{active} ? "${a_stat_acttag}[active]$rst" : "${a_stat_undeftag}[unused]$rst";
+        my $value = $item->{value};
+        
+        # Truncate system strings unless -vv
+        if ($item->{type} eq 'system_string' && $verbose_level < 2) {
+            $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
+        }
+        
+        if ($item->{active}) {
+            say "${indent}<- $item->{source}($item->{type}) = \"${a_stat_actval}${value}$rst\" $active_marker";
+        } else {
+            say "${indent} <- $item->{source}($item->{type}) = '$value' $active_marker";  
+        }
+        say "${indent}    Loc: $item->{location}" if $item->{location} ne 'command line';
+        $indent .= " ";
+    }
+    
+    # Session precedence
+    say "  - Session";
+    $indent = "   ";
+    for my $item (@{$status_info->{precedence}{session}}) {
+        my $active_marker = $item->{active} ? "${a_stat_acttag}[active]$rst" : "${a_stat_undeftag}[unused]$rst";
+        
+        if ($item->{active}) {
+            say "${indent}<- $item->{source} = \"${a_stat_actval}$item->{value}$rst\" $active_marker";
+        } else {
+            say "${indent} <- $item->{source}($item->{type}) = '$item->{value}' $active_marker";
+        }
+        say "${indent}    Loc: $item->{location}" if $item->{location} ne 'command line' && $item->{location} ne 'system defaults';
+        $indent .= " ";
+    }
+    
+    say "${a_stat_actline}* Sources:$rst";
+    
+    # Sources view
+    for my $source_name (qw(CLI SHELL SESSION USER SYSTEM)) {
+        my $source_data = $status_info->{sources}{$source_name};
+        next unless $source_data && keys %$source_data;
+        
+        my $location = $status_info->{file_locations}{$source_name} || '';
+        say "  - $source_name" . ($location ? ": $location" : "");
+        
+        for my $key (sort keys %$source_data) {
+            my $value = $source_data->{$key};
+            
+            # Truncate system strings unless -vv
+            if ($key eq 'system_string' && $verbose_level < 2) {
+                $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
+            }
+            
+            # Determine if this setting is actually being used
+            my $is_used = $self->_is_setting_used($source_name, $key, $status_info);
+            my $usage_tag = $is_used ? "${a_stat_acttag}[used]$rst" : "${a_stat_undeftag}[unused]$rst";
+            
+            say "    $key: '$value' $usage_tag";
+        }
+    }
+}
+
+sub _is_setting_used {
+    my ($self, $source_name, $key, $status_info) = @_;
+    
+    # Check if this source/key combination is the active one in precedence
+    for my $category (values %{$status_info->{precedence}}) {
+        for my $item (@$category) {
+            if ($item->{active} && $item->{source} eq $source_name) {
+                return 1 if ($key eq $item->{type}) || ($key eq 'session' && $item->{type} eq 'session');
+            }
+        }
+    }
+    return 0;
 }
 
 

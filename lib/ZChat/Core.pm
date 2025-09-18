@@ -23,7 +23,20 @@ sub new {
         backend  => _resolve_backend($opts{backend}),
         model_info => undef,
         model_info_loaded => 0,
+        host_url => '', # Derived from api_base without URI
     };
+    my ($tmp_url) = ($self->{api_base} =~ m#^(.+?//.+?)(?:/|$)#);
+    if (!defined $tmp_url) {
+    	swarn 0, <<~"EOT";
+			Couldn't derive plain base URL (with URI stripped) from
+			  api_base: $$self{api_base}.
+			Potential misconfiguration in provided API URL.
+			If your api base functions, somehow, okay, but we won't be able to build
+			tokenization and n_ctx requests.
+			EOT
+	} else {
+		$self->{host_url} = $tmp_url // undef;
+	}
 
     bless $self, $class;
     return $self;
@@ -40,8 +53,8 @@ sub complete_request($self, $messages, $optshro=undef) {
         for my $i (0..$#$messages) {
             my $msg = $messages->[$i];
             my $content_len = length($msg->{content});
-            sel(3, "Message $i: role=$msg->{role}, length=$content_len");
-            sel(4, "Message $i content: $msg->{content}");
+            sel(3, "Message $i: role=$$msg{role}, length=$content_len");
+            sel(4, "Message $i content: $$msg{content}");
         }
     }
 
@@ -93,11 +106,11 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
 
     my %headers = ('Content-Type' => 'application/json');
     if ($self->{api_key}) {
-        $headers{'Authorization'} = "Bearer $self->{api_key}";
+        $headers{'Authorization'} = "Bearer $$self{api_key}";
     }
 
     my $tx = $ua->build_tx(
-        POST => "$self->{api_base}/chat/completions",
+        POST => "$$self{api_base}/chat/completions",
         \%headers,
         json => $data
     );
@@ -184,11 +197,11 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
 
     my %headers = ('Content-Type' => 'application/json');
     if ($self->{api_key}) {
-        $headers{'Authorization'} = "Bearer $self->{api_key}";
+        $headers{'Authorization'} = "Bearer $$self{api_key}";
     }
 
     my $tx = $ua->post(
-        "$self->{api_base}/chat/completions",
+        "$$self{api_base}/chat/completions",
         \%headers,
         json => $data
     );
@@ -230,7 +243,6 @@ sub get_model_info {
 	# Undefined backend will try llama.cpp then ollama
 	# "" disables the hits entirely
 
-    $DB::single=1;
     return $self->{model_info} if $self->{model_info_loaded};
 
 	# Backend was disabled by caller (ie. set to '')
@@ -241,13 +253,9 @@ sub get_model_info {
 
 	# If it's undefined we try each...
     if (!defined $backend || $backend eq 'llama.cpp') {
-        $url = $self->{api_base};
-        $url =~ s{/v1$}{};
-        $url .= "/props";
+        $url = "$$self{host_url}/props";
     } elsif (!defined $backend || $backend eq 'ollama') {
-        $url = $self->{api_base};
-        $url =~ s{/v1$}{};
-        $url .= "/api/show";
+        $url = "$$self{host_url}/api/show";
     } else {
     	$backend //= "Undefined"; 
         swarnl(0, "Unknown backend '$backend'. Use 'llama.cpp', 'ollama', or leave unset.");
@@ -302,7 +310,7 @@ sub tokenize {
     my $with_pieces = $opts->{with_pieces} || 0;
 
     my $ua = LWP::UserAgent->new(timeout => 5);
-    my $url = "$self->{api_base}/tokenize";
+    my $url = "$$self{host_url}/tokenize";
 
     my $request_data = { content => $text };
     $request_data->{with_pieces} = JSON::XS::true if $with_pieces;
@@ -314,7 +322,8 @@ sub tokenize {
 
     my $res = $ua->request($req);
     unless ($res->is_success) {
-        warn "Tokenization request failed: " . $res->status_line;
+        warn "Tokenization request failed: " . $res->status_line . "\n" .
+			" URL: $url";
         return wantarray ? () : 0;
     }
 
@@ -371,7 +380,7 @@ sub health_check {
     my ($self) = @_;
 
     my $ua = LWP::UserAgent->new(timeout => 2);
-    my $response = $ua->get("$self->{api_base}/health");
+    my $response = $ua->get("$$self{api_base}/health");
 
     return {
         status => $response->is_success,

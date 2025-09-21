@@ -162,6 +162,7 @@ if ($opt->help) {
     my $pager = pager();
     print $pager ($usage->text);
     print $pager <<~'EOT';
+
         Basic usage:
 
         Select or create 'myprj' session, store it active in the

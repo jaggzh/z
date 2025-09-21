@@ -1,4 +1,4 @@
-# ZChat - Modular LLM Interface with Session Management
+# z / ZChat - Modular LLM Interface with Session Management
 
 **Warning:** This whole project is a rewrite of my `z` script as a full module *and* script. **I don't guarantee anything.**
 
@@ -9,10 +9,10 @@
 </div>
 -->
 
-A sophisticated command-line LLM interface for extremely-efficient and **powerful** CLI and script-use of your favorite LLM.
+A sophisticated command-line LLM interface for **extremely-efficient and powerful** CLI and script-use of your favorite LLM.
 
 This was developed over multiple years of time, but it's now provided as a core module/API **and** the CLI tool.
-(For what it's worth, I designed this originally just for local LLM use with llama.server, but it uses an OpenAI /v1 endpoint, and for model info and whatnot also support `ollama` (not tested).
+(For what it's worth, I designed this originally for use with my llama.cpp server, but it might work with OpenAI now, as it uses the OpenAI /v1 endpoint. And model info offers ollama support (not tested).
 
 * It includes an `-i` interactive mode.
 * Store your interactions, history, and pins, in a new named session as easy as `-n session-name`.
@@ -32,6 +32,18 @@ Session/conversation management is treated as a first-class architectural concer
 * **A clean modular design:** That separates CLI convenience from programmatic access.
 
 ## Some easy use.
+
+Set your backend URL in an env var (I'm unfamiliar with these, but they're in here; feel free to PR).
+Defaults to 127.0.0.1 port 8080.
+
+```
+Pick your favorite:
+LLAMA_URL LLAMA_API_URL LLAMACPP_SERVER LLAMA_CPP_SERVER LLM_API_URL
+OPENAI_BASE_URL OPENAI_API_BASE OPENAI_URL
+
+Optional key:
+OPENAI_API_KEY LLAMA_API_KEY AZURE_OPENAI_API_KEY
+```
 
 Most commands can be combined. You can change settings, and they'll be available immediately, with a query done right there inline or piped in.
 

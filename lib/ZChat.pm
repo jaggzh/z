@@ -276,7 +276,6 @@ sub _resolve_persona_path {
     return undef unless @files;
 
     my $persona_file;
-    $DB::single=1;
     if (@files > 1) {
         die "  REFUSING: Multiple persona files found for '$name':"
             if ! $self->{_fallbacks_ok};

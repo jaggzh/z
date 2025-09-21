@@ -22,7 +22,6 @@ use bansi;
 use Getopt::Long::Descriptive;
 # use Getopt::Long::Descriptive::Opts;
 use POSIX qw(strftime);
-use LWP::UserAgent;
 use JSON::XS;
 use URI::Escape;
 use Data::Dumper;

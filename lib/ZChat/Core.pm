@@ -20,6 +20,7 @@ sub new {
     my $self = {
         api_base => _resolve_api_base($opts{api_base}),
         api_key  => _first_defined($opts{api_key}, _resolve_api_key()),
+        fallback_api_key => $opts{fallback_api_key} // 'na',
         backend  => _resolve_backend($opts{backend}),
         model_info => undef,
         model_info_loaded => 0,
@@ -42,6 +43,23 @@ sub new {
     return $self;
 }
 
+# Build standard headers for API requests
+sub _build_headers {
+    my ($self, %extra_headers) = @_;
+    
+    my %headers = (
+        'Content-Type' => 'application/json',
+        %extra_headers
+    );
+    
+    # Use provided API key, or fallback if none provided
+    my $api_key = $self->{api_key} || $self->{fallback_api_key};
+    if ($api_key) {
+        $headers{'Authorization'} = "Bearer $api_key";
+    }
+    
+    return \%headers;
+}
 sub complete_request($self, $messages, $optshro=undef) {
     $optshro ||= {};
 
@@ -103,15 +121,11 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
     my $on_chunk = $optshro->{on_chunk};
 
     my $ua = Mojo::UserAgent->new(max_response_size => 0);
-
-    my %headers = ('Content-Type' => 'application/json');
-    if ($self->{api_key}) {
-        $headers{'Authorization'} = "Bearer $$self{api_key}";
-    }
+    my $headers = $self->_build_headers();
 
     my $tx = $ua->build_tx(
         POST => "$$self{api_base}/chat/completions",
-        \%headers,
+        $headers,
         json => $data
     );
 
@@ -194,15 +208,11 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
 
     my $start_time = time;
     my $ua = Mojo::UserAgent->new();
-
-    my %headers = ('Content-Type' => 'application/json');
-    if ($self->{api_key}) {
-        $headers{'Authorization'} = "Bearer $$self{api_key}";
-    }
+    my $headers = $self->_build_headers();
 
     my $tx = $ua->post(
         "$$self{api_base}/chat/completions",
-        \%headers,
+        $headers,
         json => $data
     );
 
@@ -264,7 +274,15 @@ sub get_model_info {
 
 	sel 1, "get_model_info() hitting $url";
     my $ua = LWP::UserAgent->new(timeout => 5);
-    my $response = $ua->get($url);
+    
+    # Build request with proper headers
+    my $req = HTTP::Request->new('GET', $url);
+    my $headers = $self->_build_headers();
+    for my $header_name (keys %$headers) {
+        $req->header($header_name => $headers->{$header_name});
+    }
+    
+    my $response = $ua->request($req);
     unless ($response->is_success) {
         sel(2, "Model info fetch failed from $url: " . $response->status_line);
         $self->{model_info_loaded} = 1;
@@ -317,7 +335,13 @@ sub tokenize {
 
     my $json = encode_json($request_data);
     my $req = HTTP::Request->new('POST', $url);
-    $req->content_type('application/json');
+    
+    # Use consistent header building
+    my $headers = $self->_build_headers();
+    for my $header_name (keys %$headers) {
+        $req->header($header_name => $headers->{$header_name});
+    }
+    
     $req->content($json);
 
     my $res = $ua->request($req);
@@ -380,7 +404,15 @@ sub health_check {
     my ($self) = @_;
 
     my $ua = LWP::UserAgent->new(timeout => 2);
-    my $response = $ua->get("$$self{api_base}/health");
+    
+    # Build request with headers for consistency
+    my $req = HTTP::Request->new('GET', "$$self{api_base}/health");
+    my $headers = $self->_build_headers();
+    for my $header_name (keys %$headers) {
+        $req->header($header_name => $headers->{$header_name});
+    }
+    
+    my $response = $ua->request($req);
 
     return {
         status => $response->is_success,
@@ -410,24 +442,38 @@ sub _normalize_base_with_v1 {
 
 sub _resolve_backend {
     my ($opt_val) = @_;
-    return _first_defined($opt_val, $ENV{ZCHAT_BACKEND});
+    my $backend = _first_defined(
+    	$opt_val,
+    	$ENV{ZCHAT_BACKEND},
+    	defined _get_llama_envval() ? 'llama.cpp' : undef,
+    );
+    return $backend;
 }
 
-sub _resolve_api_base {
-    my ($opt_val) = @_;
-    my $env_val = _first_defined(
-        $ENV{OPENAI_BASE_URL},
-        $ENV{OPENAI_API_BASE},
-        $ENV{OPENAI_URL},
+sub _get_llama_envval {
+    return _first_defined(
         $ENV{LLAMA_URL},
         $ENV{LLAMA_API_URL},
         $ENV{LLAMACPP_SERVER},
         $ENV{LLAMA_CPP_SERVER},
         $ENV{LLM_API_URL},
+	);
+}
+
+sub _get_openai_envval {
+    return _first_defined(
+        $ENV{OPENAI_BASE_URL},
+        $ENV{OPENAI_API_BASE},
+        $ENV{OPENAI_URL},
+	);
+}
+
+sub _resolve_api_base {
+    my ($opt_val) = @_;
+    my $env_val = _first_defined(
+    	_get_llama_envval(),
+    	_get_openai_envval(),
     );
-    if (!$opt_val && $ENV{LLM_API_URL}) {
-        sel 2, "Note: LLM_API_URL is deprecated; use OPENAI_BASE_URL or LLAMA_API_URL instead.";
-    }
     return _normalize_base_with_v1(_first_defined($opt_val, $env_val));
 }
 

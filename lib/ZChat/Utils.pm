@@ -361,7 +361,7 @@ sub encode_pipestr_part {
 
 sub pager { # $p = pager(); print $p "stuff"; pagerend();
     my $pager;
-    open($pager, '|-', ($ENV{PAGER} // 'less -F')) && return $pager;
+    open($pager, '|-', ($ENV{PAGER} // 'less -RF')) && return $pager;
     \*STDOUT;
 }
 sub pagerdone($p) {

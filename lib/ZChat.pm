@@ -122,7 +122,7 @@ sub _load_config($self, $optshro=undef) {
 
     # Resolve and narrow CLI system prompt options before passing to config
     my %resolved_cli = %$optshro;
-    
+
     if (defined $optshro->{system}) {
         my $resolved = $self->_resolve_and_narrow_system($optshro->{system}, 'CLI');
         if ($resolved) {
@@ -145,7 +145,7 @@ sub _load_config($self, $optshro=undef) {
             }
         }
     }
-    
+
     if (defined $optshro->{system_file}) {
         my $resolved = $self->_resolve_system_file_with_fallback($optshro->{system_file});
         if ($resolved) {
@@ -161,23 +161,25 @@ sub _load_config($self, $optshro=undef) {
         }
     }
 
+    # Store resolved options for later retrieval by storage operations
+    $self->{_resolved_cli_options} = \%resolved_cli;
     my $config = $self->{config}->load_effective_config(\%resolved_cli);
 }
 
 sub _resolve_and_narrow_system {
     my ($self, $name, $source) = @_;
-    
+
     sel(2, "Resolving --system '$name' from $source");
-    
+
     # Check if it's obviously intended as a path (absolute or contains ..)
     my $is_obvious_path = ($name =~ m#^/# || $name =~ m#\.\.#);
-    
+
     if ($is_obvious_path) {
         sel(2, "Treating '$name' as path only (absolute or contains ..)");
         my $resolved_path = $self->_resolve_system_file_with_fallback($name);
         return $resolved_path ? { type => 'file', value => $resolved_path } : undef;
     }
-    
+
     # Try as file first
     sel(2, "Trying '$name' as system file");
     my $file_path = $self->_resolve_system_file_with_fallback($name, { no_error => 1 });
@@ -185,7 +187,7 @@ sub _resolve_and_narrow_system {
         sel(2, "Resolved '$name' as file: $file_path");
         return { type => 'file', value => $file_path };
     }
-    
+
     # Try as persona
     sel(2, "Trying '$name' as persona");
     my $persona_path = $self->_resolve_persona_path($name);
@@ -193,7 +195,7 @@ sub _resolve_and_narrow_system {
         sel(2, "Resolved '$name' as persona");
         return { type => 'persona', value => $name };  # Store original name, not path
     }
-    
+
     sel(1, "Could not resolve '$name' as file or persona");
     return undef;
 }
@@ -201,57 +203,57 @@ sub _resolve_and_narrow_system {
 sub _resolve_system_file_with_fallback {
     my ($self, $path, $opts) = @_;
     $opts ||= {};
-    
+
     sel(2, "Resolving system file: '$path'");
-    
+
     # 1. Try relative/absolute paths first
     my $resolved = $self->_try_resolve_path($path);
     return $resolved if $resolved;
-    
+
     # 2. If not found and doesn't contain .. (security check), try system directory
     if ($path !~ m#\.\.#) {
         my $system_dir = $self->_get_system_prompts_dir();
         my $system_path = File::Spec->catfile($system_dir, $path);
         sel(2, "Trying system directory: $system_path");
-        
+
         $resolved = $self->_try_resolve_path($system_path);
         return $resolved if $resolved;
     } else {
         sel(2, "Skipping system directory check (path contains ..)");
     }
-    
+
     # Not found
     unless ($opts->{no_error}) {
         my @searched = ($path);
         push @searched, File::Spec->catfile($self->_get_system_prompts_dir(), $path) if $path !~ m#\.\.#;
         my $searched_str = join(", ", @searched);
-        
+
         if ($self->{_fallbacks_ok}) {
             swarn "System file not found: '$path' (searched: $searched_str)";
         } else {
             die "System file not found: '$path' (searched: $searched_str)\n";
         }
     }
-    
+
     return undef;
 }
 
 sub _try_resolve_path {
     my ($self, $path) = @_;
-    
+
     # Handle broken symlinks as errors (they're obviously intended paths)
     if (-l $path && !-e $path) {
         swarn "Broken symlink detected: $path";
         return undef unless $self->{_fallbacks_ok};
     }
-    
+
     # Check if it's a file
     if (-f $path) {
         my $abs_path = abs_path($path);
         sel(2, "Found file: $path -> $abs_path");
         return $abs_path;
     }
-    
+
     # Check if it's a directory with system file
     if (-d $path) {
         my $system_file = File::Spec->catfile($path, 'system');
@@ -265,7 +267,7 @@ sub _try_resolve_path {
             return undef;
         }
     }
-    
+
     return undef;
 }
 
@@ -277,12 +279,12 @@ sub _get_system_prompts_dir {
 
 sub _load_meta_yaml {
     my ($self, $system_file_path) = @_;
-    
+
     my $dir = dirname($system_file_path);
     my $meta_file = File::Spec->catfile($dir, 'meta.yaml');
-    
+
     return {} unless -f $meta_file;
-    
+
     sel(2, "Loading meta.yaml: $meta_file");
     my $meta = $self->{storage}->load_yaml($meta_file);
     return $meta || {};
@@ -397,7 +399,7 @@ sub _get_system_content {
         $content = read_file($abs_path);
         die "system-file '$abs_path' unreadable or empty\n" unless defined $content && $content ne '';
         sel(2, "Loaded system file length: " . length($content));
-        
+
         # Load meta.yaml if it exists
         $meta = $self->_load_meta_yaml($abs_path);
     }
@@ -421,7 +423,7 @@ sub _get_system_content {
             $content = read_file($ppath);
             die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';
             sel(2, "Loaded persona content length: " . length($content));
-            
+
             # Load meta.yaml if it exists
             $meta = $self->_load_meta_yaml($ppath);
         }
@@ -705,15 +707,15 @@ sub query($self, $user_text, $optshro=undef) {
     my $shims = $self->{config}->get_pin_shims();
     my $pins_msgs = $self->{pin_mgr}->build_message_array_with_shims(
         $shims,
-		{
-			sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
-			user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
-			ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
-			user_template => $self->{config}->get_pin_tpl_user(),
-			ast_template => $self->{config}->get_pin_tpl_ast(),
-		},
+    	{
+    		sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
+    		user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
+    		ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
+    		user_template => $self->{config}->get_pin_tpl_user(),
+    		ast_template => $self->{config}->get_pin_tpl_ast(),
+    	},
     );
-    
+
     my @context   = @{ $self->{history}->messages() // [] };
     my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
 
@@ -739,11 +741,11 @@ sub query($self, $user_text, $optshro=undef) {
             on_chunk => $cb,
             fallbacks_ok => $self->{_fallbacks_ok}
         });
-        
+
         # Extract content and metadata from result
         $response_text = $result->{content} if ref($result) eq 'HASH';
         $response_metadata = $result->{metadata} || {} if ref($result) eq 'HASH';
-        
+
         # If old API (just returns string), handle gracefully
         if (ref($result) ne 'HASH') {
             $response_text = $result;
@@ -754,7 +756,7 @@ sub query($self, $user_text, $optshro=undef) {
             stream => 0,
             fallbacks_ok => $self->{_fallbacks_ok}
         });
-        
+
         # Extract content and metadata
         if (ref($result) eq 'HASH') {
             $response_text = $result->{content};
@@ -779,7 +781,7 @@ sub query($self, $user_text, $optshro=undef) {
         # Use filtered version for return and storage
         $response_text = $filtered_response;
     }
-    
+
     if ($response_text !~ /\n$/) {
         print $print_fh "\n";
     }
@@ -863,61 +865,61 @@ sub history_owrite_last($self, $payload, $optshro=undef) {
 sub show_status {
     my ($self, $verbose_level) = @_;
     $verbose_level //= 0;
-    
+
     my $def_abbr_sysstr = 30;
-    
+
     # Load the configuration if not already loaded
     $self->{config}->load_effective_config();
-    
+
     my $status_info = eval { $self->{config}->get_status_info() };
     if ($@) {
         serr "Failed to collect status information: $@";
         return;
     }
-    
+
     # Header
     say "${a_stat_actline}ZChat Configuration Status$rst";
     say "Session: " . $self->get_session_name();
     say "";
-    
+
     say "${a_stat_actline}* Precedence:$rst";
-    
+
     # System prompt precedence
     $self->_show_precedence_section("System prompt", 
         $status_info->{precedence}{system_prompt}, $verbose_level, $def_abbr_sysstr);
-    
-    # Session precedence  
+
+    # Session precedence
     $self->_show_precedence_section("Session",
         $status_info->{precedence}{session}, $verbose_level, $def_abbr_sysstr);
-    
+
     say "${a_stat_actline}* Sources:$rst";
-    
+
     # Sources view
     for my $source_name (qw(CLI SHELL SESSION USER SYSTEM)) {
         my $source_data = $status_info->{sources}{$source_name};
         next unless $source_data && keys %$source_data;
-        
+
         my $location = $status_info->{file_locations}{$source_name} || '';
         say "  - $source_name" . ($location ? ": $location" : "");
-        
+
         # Show file existence status for file-based sources
         if ($source_name =~ /^(SESSION|USER|SHELL)$/ && $location && $location ne 'system defaults') {
             my $exists = -e $location ? "${a_stat_exists}[exists]$rst" : "${a_stat_undeftag}[missing]$rst";
             say "    File: $exists";
         }
-        
+
         for my $key (sort keys %$source_data) {
             my $value = $source_data->{$key};
-            
-            # Truncate long values unless -vv  
+
+            # Truncate long values unless -vv
             if (($key eq 'system_string' || length($value) > 50) && $verbose_level < 2) {
                 $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
             }
-            
+
             # Determine if this setting is actually being used
             my $is_used = $self->{config}->_is_setting_used($source_name, $key, $status_info);
             my $usage_tag = $is_used ? "${a_stat_acttag}[used]$rst" : "${a_stat_undeftag}[unused]$rst";
-            
+
             say "    $key: '$value' $usage_tag";
         }
         say "";
@@ -926,38 +928,38 @@ sub show_status {
 
 sub _show_precedence_section {
     my ($self, $section_name, $precedence_items, $verbose_level, $def_abbr_sysstr) = @_;
-    
+
     return unless $precedence_items && @$precedence_items;
-    
+
     say "  - $section_name";
     my $indent = "   ";
-    
+
     for my $item (@$precedence_items) {
         my $active_marker = $item->{active} ? 
             "${a_stat_acttag}[active]$rst" : "${a_stat_undeftag}[unused]$rst";
         my $value = $item->{value} // 'undef';
-        
+
         # Truncate system strings unless -vv
         if ($item->{type} eq 'system_string' && $verbose_level < 2) {
             $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
         }
-        
+
         # Format the line based on whether it's active
         my $arrow = $item->{active} ? "<-" : " <-";
         my $source_info = "$item->{source}";
         $source_info .= "($item->{type})" if $item->{type} ne 'session';
-        
+
         if ($item->{active}) {
             say "${indent}$arrow $source_info = \"${a_stat_actval}${value}$rst\" $active_marker";
         } else {
             say "${indent}$arrow $source_info = '$value' $active_marker";
         }
-        
-        # Show location for non-CLI sources  
+
+        # Show location for non-CLI sources
         if ($item->{location} && $item->{location} ne 'command line' && $item->{location} ne 'system defaults') {
             say "${indent}    Loc: $item->{location}";
         }
-        
+
         $indent .= " ";
     }
     say "";
@@ -965,19 +967,98 @@ sub _show_precedence_section {
 
 sub validate_status_display {
     my ($self) = @_;
-    
+
     # Check if session directory exists
     my $session_dir = $self->_get_session_dir();
     my $session_exists = $session_dir && -d $session_dir;
-    
+
     # Check if required config files are readable
     my $user_config_readable = -r $self->_get_user_config_path();
-    
+
     return {
         session_dir_exists => $session_exists,
         user_config_readable => $user_config_readable,
         current_session => $self->get_session_name(),
     };
+}
+
+sub clear_system_user {
+    my ($self) = @_;
+    my $config = $self->{config}->_load_user_config() || {};
+    delete $config->{system_string};
+    delete $config->{system_file};
+    delete $config->{system_persona};
+    delete $config->{system};
+    return $self->{config}->store_user_config($config);
+}
+
+sub clear_system_session {
+    my ($self) = @_;
+    my $config = $self->{config}->_load_session_config() || {};
+    delete $config->{system_string};
+    delete $config->{system_file};
+    delete $config->{system_persona};
+    delete $config->{system};
+    return $self->{config}->store_session_config($config);
+}
+
+sub clear_system_shell {
+    my ($self) = @_;
+    my $config = $self->{config}->_load_shell_config() || {};
+    delete $config->{system_string};
+    delete $config->{system_file};
+    delete $config->{system_persona};
+    delete $config->{system};
+    # Keep session name if it exists
+    return $self->{config}->store_shell_config($config);
+}
+
+sub clear_session_user {
+    my ($self) = @_;
+    my $config = $self->{config}->_load_user_config() || {};
+    delete $config->{session};
+    return $self->{config}->store_user_config($config);
+}
+
+sub clear_session_shell {
+    my ($self) = @_;
+    my $config = $self->{config}->_load_shell_config() || {};
+    delete $config->{session};
+    return $self->{config}->store_shell_config($config);
+}
+
+sub del_user_config {
+    my $config_file = ZChat::Config::get_user_config_path();
+    if (-f $config_file) {
+        return unlink($config_file);
+    }
+    return 1;
+}
+
+sub del_session_config {
+    my ($session_name) = @_;
+    my $session_dir = ZChat::Config::get_session_dir($session_name);
+    if (-d $session_dir) {
+        return File::Path::remove_tree($session_dir);
+    }
+    return 1;
+}
+
+sub del_shell_config {
+    my ($override_pproc) = @_;
+    my $shell_file = ZChat::Config::get_shell_config_file($override_pproc);
+    if (-f $shell_file) {
+        return unlink($shell_file);
+    }
+    return 1;
+}
+
+
+sub get_resolved_cli_options {
+    my ($self) = @_;
+
+    # Return the resolved CLI options that were processed in _load_config
+    return $self->{_resolved_cli_options} || {};
 }
 
 1;

@@ -835,6 +835,28 @@ sub _is_setting_used {
     return 0;
 }
 
+sub get_user_config_path {
+    my $home = $ENV{HOME} || die "HOME environment variable not set";
+    return File::Spec->catfile($home, '.config', 'zchat', 'user.yaml');
+}
+
+sub get_session_dir {
+    my ($session_name) = @_;
+    return undef unless $session_name;
+    
+    my $home = $ENV{HOME} || die "HOME environment variable not set";
+    my $config_dir = File::Spec->catdir($home, '.config', 'zchat');
+    my @session_parts = split('/', $session_name);
+    return File::Spec->catdir($config_dir, 'sessions', @session_parts);
+}
+
+sub get_shell_config_file {
+    my ($override_pproc) = @_;
+    my $uid = $<;
+    my $session_id = $override_pproc || get_parent_id();
+    return "/tmp/zchat-$uid-$session_id.yaml";
+}
+
 
 1;
 

@@ -68,6 +68,8 @@ my $intmode_prompt = "$C_IGN_S$gra${C_IGN_E}>> $C_IGN_S$rst$clr_user$C_IGN_E";
 my $clr_notice_bg = a24bg(30,155,30);
 my $clr_notice_fg = $whi;
 
+sub help_sec($str) { "\033[44;33;1m $str $rst" }
+
 my ($opt, $usage) = describe_options(
     'z %o [prompt]',
     [ 'help|h',             "This beautiful help" ],
@@ -88,25 +90,40 @@ my ($opt, $usage) = describe_options(
     [ 'play-resp|pr',       "Play response text with TTS" ],
     [ 'probs',              "Return probabilities for top N tokens" ],
     [ 'no-color|nc',        "Disable color in interactive mode" ],
-    [ 'grammar|g=s',        "Force a grammar" ],
+    [ 'grammar|g=s',        "Force a grammar (string)" ],
     [ 'thought|think',      "Do not remove reasoning sections" ],
     [ 'thought-re|tre=s',   "Specify a regex for stripping reasoning" ],
     [],
-    [ 'Storage options and Session management:' ],
+    [ help_sec('Storage options and Session management:') ],
     [ 'session|n=s',        "Session name (slash-separated path)" ],
     [],
-    [ 'store-user|su|S',    "Store session in user global config" ],
-    [ 'store-session|ss',   "Store in current session config" ],
-    [ 'store-pproc|store-shell|sp',  "Save session name and system-prompt settings tied to your current shell. This uses SID+PPID in POSIX systems (and uses the /proc/ file system to obtain the group leader)" ],
+    [ 'store-user|su|S',    "Store CLI settings in user global config" ],
+    [ 'store-session|ss',   "Store CLI settings in current session config" ],
+    [ 'store-pproc|store-shell|sp',  "Save a session name and/or system-prompt tied to your current shell. This uses SID+PPID in POSIX systems (and uses the /proc/ file system to obtain the group leader)" ],
     [ 'set-pproc=i',        "Override parent ID for --store-pproc/--sp, if you think you know better, but when our SID+PPID fail to match you only have yourself to blame." ],
     [],
-    [ 'System Prompt:' ],
+    [ help_sec('System Prompt:') ],
     [ 'system-string|system-str|sstr=s', "Set system prompt as a literal string (highest explicit source after file)" ],
     [ 'system-file|sfile=s', "Set system prompt from a file (relative paths allowed)" ],
     [ 'system-persona|spersona|persona=s', "Set system prompt by persona name (resolved by persona tool)" ],
     [ 'system|sys|s=s',     "Auto-resolve through -file then -persona (but does NOT accept a string)" ],
     [],
-    [ 'History:' ],
+    [ help_sec('Deleting things (but see History wipe next section)') ],
+    [ 'del-user|du', "Wipe (delete) entire user global config" ],
+    [ 'del-session|ds', "Wipe (delete) entire session (history, pins, settings, ..)" ],
+    [ 'del-pproc|del-shell|dp', "Wipe (delete) shell-tied config" ],
+    [],
+    [ 'clear-system-user|csu|cS', "Clear system prompts from user global config" ],
+    [ 'clear-system-session|css', "Clear system prompts from current session config" ],
+    [ 'clear-system-pproc|clear-system-shell|csp', "Clear from shell-tied config" ],
+    [ "Note: The above options allow you to clear at one level while assigning a new one runtime OR storing it during the same run." ],
+    [ "  e.g. '--csp --system-file data/coder.txt --sp'" ],
+    [],
+    [ 'clear-session-user|cssu|cssS', "Clear session name from user global config" ],
+    [ 'clear-session-pproc|clear-session-shell|cssp', "Clear session name from shell-tied config" ],
+    [ 'Note: You can\'t store a session name in a session. :)' ],
+    [],
+    [ help_sec('History:') ],
     [ 'wipe|w',             "Wipe conversation history" ],
     [ 'wipeold|wipeexp|we|wo=s',  "Wipe/expire msgs older than {FLOAT TIME}[smhdwMyY] (e.g. 1.5h)" ],
     [ 'no-history|H',       "Do not use history (no load, no store)" ],
@@ -116,12 +133,12 @@ my ($opt, $usage) = describe_options(
     [ 'conv-last|cl=s',     "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
     [ 'output-last|ol',     "Write last message to STDOUT (same as '--conv-last -')" ],
     [],
-    [ 'Utility:' ],
+    [ help_sec('Utility:') ],
     [ 'list-sys|sys-list|L', "List available file and 'persona'-based system prompts." ],
     [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
     [ 'status|stat',        "Show current configuration status and precedence" ],
     [],
-    [ 'Message pinning (see --help-pins):' ],
+    [ help_sec('Message pinning (see --help-pins):') ],
     [ 'pin=s@',             "Add pinned message(s)" ],
     [ 'pins-file=s@',       "Add pinned message(s) from file(s)" ],
     [ 'pins-list',          "List all pinned messages (their lines will wrap)" ],
@@ -134,7 +151,7 @@ my ($opt, $usage) = describe_options(
     [ 'pins-sys-max=i',     "Max system pins", { default => $def_pin_max } ],
     [ 'pins-user-max=i',    "Max user pins", { default => $def_pin_max } ],
     [ 'pins-ast-max=i',     "Max assistant pins", { default => $def_pin_max } ],
-
+	[],
     [ 'pin-sys=s@',         "Add system pin(s)" ],
     [ 'pin-user=s@',        "Add user pin(s)" ],
     [ 'pin-ast=s@',         "Add assistant pin(s) (shorthand: ast)" ],
@@ -149,7 +166,8 @@ my ($opt, $usage) = describe_options(
 	[ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: vars)" ],
 	[ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: concat)" ],
 	[ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
-	[ 'Help:' ],
+	[],
+	[ help_sec('Help:') ],
     [ 'help-sys-pin-vars',  "Show quick example of template vars to use for system pins", ],
     [ 'help-pins',          "Show detailed help for pinning" ],
     [ 'help-cli',           "CLI use - Basic", ],
@@ -219,6 +237,71 @@ if ($opt->help_sys_pin_vars) {
         EOT
     exit;
 }
+
+if (defined $opt->system && $opt->system eq '') {
+    die "${bred}ERROR: --system cannot be empty. Use --clear-system-* to remove system prompts.$rst\n";
+}
+if (defined $opt->system_file && $opt->system_file eq '') {
+    die "${bred}ERROR: --system-file cannot be empty. Use --clear-system-* to remove system prompts.$rst\n";
+}
+if (defined $opt->system_persona && $opt->system_persona eq '') {
+    die "${bred}ERROR: --system-persona cannot be empty. Use --clear-system-* to remove system prompts.$rst\n";
+}
+
+## Wiping session chat history needs to know the session name.
+## But our session name could come from the current shell's settings,
+##  ..so we can't wipe-pproc (--csp) before we (-w):
+
+# Early session resolution before any wipe operations
+# Determine target session early, before any wipe operations that might affect resolution
+my $target_session;
+if ($opt->wipe || $opt->wipe_session) {
+    # Need to resolve session before wiping anything that affects resolution
+    $target_session = $opt->session // $ENV{ZCHAT_SESSION};
+    
+    # If still undefined, check shell config before we potentially wipe it
+    if (!defined $target_session && !$opt->wipe_pproc) {
+        # Only check shell config if we're not about to wipe it
+        my $shell_file = ZChat::Config::get_shell_config_file($opt->set_pproc);
+        if (-f $shell_file) {
+            my $shell_config = YAML::XS::LoadFile($shell_file);
+            $target_session = $shell_config->{session} if $shell_config;
+        }
+    }
+    
+    # Fall back to user config, then default
+    if (!defined $target_session) {
+        my $user_file = ZChat::Config::get_user_config_path();
+        if (-f $user_file) {
+            my $user_config = YAML::XS::LoadFile($user_file);
+            $target_session = $user_config->{session} if $user_config;
+        }
+    }
+    
+    $target_session //= 'default';
+    sel(2, "Resolved target session for wipe operations: $target_session");
+}
+
+# Now handle delete operations with known target session
+if ($opt->del_session) {
+    ZChat::del_session_config($target_session) or die "Failed to delete session: $!";
+    sel 1, "Deleted session '$target_session'";
+    $non_query_acts++;
+}
+
+if ($opt->del_pproc) {
+    ZChat::del_shell_config($opt->set_pproc) or die "Failed to delete shell config: $!";
+    sel 1, "Deleted shell config";
+    $non_query_acts++;
+}
+
+if ($opt->del_user) {
+    ZChat::del_user_config() or die "Failed to delete user config: $!";
+    sel 1, "Deleted user global config";
+    $non_query_acts++;
+}
+
+## END-WIPING
 
 # Parse input
 my $uprompt;
@@ -351,27 +434,29 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
         # Shell config can store session name AND system prompt options
         my %shell_opts = ( session => ($opt->session // $zchat->get_session_name()) );
         
-        # Add system prompt options if provided
-        $shell_opts{system_string}  = $opt->system_string  if defined $opt->system_string;
-        $shell_opts{system_file}    = $opt->system_file     if defined $opt->system_file;
-        $shell_opts{system_persona} = $opt->system_persona  if defined $opt->system_persona;
-        $shell_opts{system}         = $opt->system          if defined $opt->system;
+        # Get resolved system prompt options from ZChat instead of using raw CLI options
+        my $resolved_opts = $zchat->get_resolved_cli_options();
+        
+        # Store resolved options (system gets converted to system_file or system_persona)
+        $shell_opts{system_string}  = $resolved_opts->{system_string}  if defined $resolved_opts->{system_string};
+        $shell_opts{system_file}    = $resolved_opts->{system_file}    if defined $resolved_opts->{system_file};
+        $shell_opts{system_persona} = $resolved_opts->{system_persona} if defined $resolved_opts->{system_persona};
+        
+        # Only store raw system if it wasn't resolved (shouldn't happen normally)
+        $shell_opts{system} = $resolved_opts->{system} if defined $resolved_opts->{system};
         
         $zchat->store_shell_config(\%shell_opts);
         
         my @stored_items = ('session');
-        push @stored_items, 'system_string'  if defined $opt->system_string;
-        push @stored_items, 'system_file'    if defined $opt->system_file;
-        push @stored_items, 'system_persona' if defined $opt->system_persona;
-        push @stored_items, 'system'         if defined $opt->system;
+        push @stored_items, 'system_string'  if defined $resolved_opts->{system_string};
+        push @stored_items, 'system_file'    if defined $resolved_opts->{system_file};
+        push @stored_items, 'system_persona' if defined $resolved_opts->{system_persona};
+        push @stored_items, 'system'         if defined $resolved_opts->{system};
         
         sel 1, "Saved " . join(', ', @stored_items) . " for current shell (session: '$shell_opts{session}')";
         $non_query_acts++;
+        # We still have wiping and other things that might need to be done. Don't exit
     }
-    
-    # We still have wiping and other things that might need to be done. Don't exit
-    # # Exit early if no query provided
-    # exit unless defined $uprompt || $opt->interactive;
 }
 
 $zchat->set_print(1); # Module default is silent.
@@ -408,8 +493,15 @@ else { $zchat->history->set_mode('rw') }
 
 # Wipe (on-disk history)
 if ($opt->wipe) {
-    $zchat->history->wipe();
-    sel 1, "${yel}Conversation history wiped.$rst";
+    if (defined $target_session) {
+        # Use pre-resolved session for consistency
+        ZChat::wipe_session_history($target_session);
+        sel 1, "${yel}Conversation history wiped for session '$target_session'.$rst";
+    } else {
+        # Normal path - let ZChat resolve it
+        $zchat->history->wipe();
+        sel 1, "${yel}Conversation history wiped.$rst";
+    }
     $non_query_acts++;
 } elsif ($opt->wipeold) { # Wipe old messages
     $zchat->history->load();

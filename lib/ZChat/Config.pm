@@ -153,6 +153,7 @@ sub get_session_name($self) {
 sub _get_system_defaults {
     return {
         session => '',
+        system_string => 'You are a helpful AI assistant.',
         pin_defaults => {
             role => 'system',
             method => 'concat',

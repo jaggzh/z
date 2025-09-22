@@ -11,6 +11,8 @@ use String::ShellQuote;
 use Capture::Tiny ':all';
 use Text::Xslate;
 use POSIX;
+use Cwd qw(abs_path);
+use File::Basename qw(dirname);
 
 use ZChat::Core;
 use ZChat::Config;
@@ -118,94 +120,172 @@ sub store_shell_config {
 sub _load_config($self, $optshro=undef) {
     $optshro ||= {};
 
-    my $config = $self->{config}->load_effective_config( {
-        system_string => $optshro->{system_string},
-        system_file => $optshro->{system_file},
-        system_persona => $optshro->{system_persona},
-        system => $optshro->{system},
-        pin_shims => $optshro->{pin_shims},
-        pin_sys_mode => $optshro->{pin_sys_mode},
-	} );
+    # Resolve and narrow CLI system prompt options before passing to config
+    my %resolved_cli = %$optshro;
+    
+    if (defined $optshro->{system}) {
+        my $resolved = $self->_resolve_and_narrow_system($optshro->{system}, 'CLI');
+        if ($resolved) {
+            if ($resolved->{type} eq 'file') {
+                $resolved_cli{system_file} = $resolved->{value};
+                delete $resolved_cli{system};
+                sel(1, "CLI --system resolved to system_file: $resolved->{value}");
+            } elsif ($resolved->{type} eq 'persona') {
+                $resolved_cli{system_persona} = $resolved->{value};
+                delete $resolved_cli{system};
+                sel(1, "CLI --system resolved to system_persona: $resolved->{value}");
+            }
+        } else {
+            # Resolution failed
+            if ($self->{_fallbacks_ok}) {
+                swarn "System '$optshro->{system}' could not be resolved, removing from CLI options";
+                delete $resolved_cli{system};
+            } else {
+                die "System '$optshro->{system}' could not be resolved\n";
+            }
+        }
+    }
+    
+    if (defined $optshro->{system_file}) {
+        my $resolved = $self->_resolve_system_file_with_fallback($optshro->{system_file});
+        if ($resolved) {
+            $resolved_cli{system_file} = $resolved;
+            sel(1, "CLI --system-file resolved to: $resolved");
+        } else {
+            if ($self->{_fallbacks_ok}) {
+                swarn "System file '$optshro->{system_file}' could not be resolved, removing from CLI options";
+                delete $resolved_cli{system_file};
+            } else {
+                die "System file '$optshro->{system_file}' could not be resolved\n";
+            }
+        }
+    }
+
+    my $config = $self->{config}->load_effective_config(\%resolved_cli);
 }
 
-# This is old. I'm including it only because we had some more messages
-# in it good for diags but i need to maybe get those into ->query()
-sub _build_messages($self, $user_input, $optshro=undef) {
-    $optshro ||= {};
-
-    my @messages;
-
-    # 1. System message from preset/config
-    my $system_content = $self->_get_system_content();
-    if ($system_content) {
-        sel(2, "Adding system message, length: " . length($system_content));
-        sel(3, "System content: $system_content");
-        push @messages, {
-            role => 'system',
-            content => $system_content
-        };
-    } else {
-        sel(2, "No system content found");
+sub _resolve_and_narrow_system {
+    my ($self, $name, $source) = @_;
+    
+    sel(2, "Resolving --system '$name' from $source");
+    
+    # Check if it's obviously intended as a path (absolute or contains ..)
+    my $is_obvious_path = ($name =~ m#^/# || $name =~ m#\.\.#);
+    
+    if ($is_obvious_path) {
+        sel(2, "Treating '$name' as path only (absolute or contains ..)");
+        my $resolved_path = $self->_resolve_system_file_with_fallback($name);
+        return $resolved_path ? { type => 'file', value => $resolved_path } : undef;
     }
-
-    # 2. Enforce pin limits then add pinned messages (with shims and templates)
-    my $limits = $self->{config}->get_pin_limits();
-    $self->{pin_mgr}->enforce_pin_limits($limits);
-    my $shims  = $self->{config}->get_pin_shims();
-    my $pinned_messages = $self->{pin_mgr}->build_message_array_with_shims(
-        $shims,
-		{
-			sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
-			user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
-			ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
-			user_template => $self->{config}->get_pin_tpl_user(),
-			ast_template => $self->{config}->get_pin_tpl_ast(),
-		},
-    );
-    if (@$pinned_messages) {
-        sel(2, "Adding " . @$pinned_messages . " pinned messages");
-        push @messages, @$pinned_messages;
+    
+    # Try as file first
+    sel(2, "Trying '$name' as system file");
+    my $file_path = $self->_resolve_system_file_with_fallback($name, { no_error => 1 });
+    if ($file_path) {
+        sel(2, "Resolved '$name' as file: $file_path");
+        return { type => 'file', value => $file_path };
     }
-
-    # 3. Add conversation history
-    my $history = $self->{storage}->load_history($self->{session_name});
-    if ($history && @$history) {
-        sel(2, "Adding " . @$history . " history messages");
-        push @messages, @$history;
-    } else {
-        sel(2, "No conversation history found");
+    
+    # Try as persona
+    sel(2, "Trying '$name' as persona");
+    my $persona_path = $self->_resolve_persona_path($name);
+    if ($persona_path) {
+        sel(2, "Resolved '$name' as persona");
+        return { type => 'persona', value => $name };  # Store original name, not path
     }
-
-    # 4. Add current user input
-    sel(2, "Adding user input: $user_input");
-    push @messages, {
-        role => 'user',
-        content => $user_input
-    };
-
-    sel(2, "Built message array with " . @messages . " total messages");
-
-    return \@messages;
+    
+    sel(1, "Could not resolve '$name' as file or persona");
+    return undef;
 }
 
-sub _select_system_source {
+sub _resolve_system_file_with_fallback {
+    my ($self, $path, $opts) = @_;
+    $opts ||= {};
+    
+    sel(2, "Resolving system file: '$path'");
+    
+    # 1. Try relative/absolute paths first
+    my $resolved = $self->_try_resolve_path($path);
+    return $resolved if $resolved;
+    
+    # 2. If not found and doesn't contain .. (security check), try system directory
+    if ($path !~ m#\.\.#) {
+        my $system_dir = $self->_get_system_prompts_dir();
+        my $system_path = File::Spec->catfile($system_dir, $path);
+        sel(2, "Trying system directory: $system_path");
+        
+        $resolved = $self->_try_resolve_path($system_path);
+        return $resolved if $resolved;
+    } else {
+        sel(2, "Skipping system directory check (path contains ..)");
+    }
+    
+    # Not found
+    unless ($opts->{no_error}) {
+        my @searched = ($path);
+        push @searched, File::Spec->catfile($self->_get_system_prompts_dir(), $path) if $path !~ m#\.\.#;
+        my $searched_str = join(", ", @searched);
+        
+        if ($self->{_fallbacks_ok}) {
+            swarn "System file not found: '$path' (searched: $searched_str)";
+        } else {
+            die "System file not found: '$path' (searched: $searched_str)\n";
+        }
+    }
+    
+    return undef;
+}
+
+sub _try_resolve_path {
+    my ($self, $path) = @_;
+    
+    # Handle broken symlinks as errors (they're obviously intended paths)
+    if (-l $path && !-e $path) {
+        swarn "Broken symlink detected: $path";
+        return undef unless $self->{_fallbacks_ok};
+    }
+    
+    # Check if it's a file
+    if (-f $path) {
+        my $abs_path = abs_path($path);
+        sel(2, "Found file: $path -> $abs_path");
+        return $abs_path;
+    }
+    
+    # Check if it's a directory with system file
+    if (-d $path) {
+        my $system_file = File::Spec->catfile($path, 'system');
+        if (-f $system_file) {
+            my $abs_path = abs_path($system_file);
+            sel(2, "Found system directory: $path/system -> $abs_path");
+            return $abs_path;
+        } else {
+            # Directory exists but no system file - configuration error
+            swarn "Directory '$path' exists but contains no 'system' file";
+            return undef;
+        }
+    }
+    
+    return undef;
+}
+
+sub _get_system_prompts_dir {
     my ($self) = @_;
-    my $cfg = $self->{config}->get_effective_config();
+    my $home = $ENV{HOME} || die "HOME environment variable not set";
+    return File::Spec->catdir($home, '.config', 'zchat', 'system');
+}
 
-    # Determine source precedence across scopes: CLI > session > user
-    # Intra-scope priority: file > str > persona
-    my @levels = (
-        { lvl => 'CLI',     file => $cfg->{_cli_system_file},     str => $cfg->{_cli_system_str},     persona => $cfg->{_cli_system_persona} },
-        { lvl => 'SESSION', file => $cfg->{system_file_session},  str => $cfg->{system_prompt_session}, persona => $cfg->{system_persona_session} },
-        { lvl => 'USER',    file => $cfg->{system_file_user},     str => $cfg->{system_prompt_user},  persona => $cfg->{system_persona_user} },
-    );
-
-    for my $L (@levels) {
-        if ($L->{file})    { return ($L->{lvl}, file    => $L->{file}); }
-        if ($L->{str})     { return ($L->{lvl}, str     => $L->{str}); }
-        if ($L->{persona}) { return ($L->{lvl}, persona => $L->{persona}); }
-    }
-    return ('NONE');
+sub _load_meta_yaml {
+    my ($self, $system_file_path) = @_;
+    
+    my $dir = dirname($system_file_path);
+    my $meta_file = File::Spec->catfile($dir, 'meta.yaml');
+    
+    return {} unless -f $meta_file;
+    
+    sel(2, "Loading meta.yaml: $meta_file");
+    my $meta = $self->{storage}->load_yaml($meta_file);
+    return $meta || {};
 }
 
 sub _resolve_system_file {
@@ -229,17 +309,6 @@ sub _resolve_system_file {
     my $roots_str = join(", ", @roots);
     die "system-file not found: '$path' (searched: $roots_str)\n";
 }
-
-# sub _BAD_REMOVE_ME_resolve_persona_path {
-#     my ($self, $name) = @_;
-#     my @cmd = ($bin_persona, '--path', 'find', $name);
-#     my $cmd = shell_quote(@cmd);
-#     sel 1, "RESOLVE system prompt -- ATTEMPT with persona. Cmd: `$cmd`";
-#     my $path = `$cmd`;
-#     chomp $path if defined $path;
-#     die "persona '$name' not found (command: $cmd)\n" unless defined $path && $path ne '' && -f $path;
-#     return $path;
-# }
 
 sub _resolve_persona_path {
     my ($self, $name) = @_;
@@ -299,58 +368,16 @@ sub _resolve_persona_path {
     return $persona_file;
 }
 
-# sub trying_to_make_new_resolve_persona_path {
-#     my ($self, $name);
-#     if (!defined $bin_persona) {
-#         sel 1, "No \$bin_persona path is defined in ZChat.pm\n";
-#         return undef;
-#     }
-#     my @cmd = ($bin_persona, '--path', 'find', $name);
-#     my $cmd = shell_quote(@cmd);
-#     sel 1, "RESOLVE system prompt -- ATTEMPT with 'persona'. Cmd: `$cmd`";
-#     sel(1, "  Command: $cmd");
-#     my $paths;
-#     eval { $paths =`$cmd`; }; # No, let's use Capture::Tiny
-#     ..... you can ignore all the specifics of variable names and make it consistent with our current project code, message style, sel levels, etc. But clean it up and make it better. If we have access to 'fallbacks_ok' we should use the first line (the first persona path)!
-
-
-
-#     chomp $paths if defined $paths;
-#     sel(1, "Loading Persona from disk with persona command");
-#     if ($? != 0) {
-#         sel(1, "'persona' bin ($bin_persona) wasn't found or command errored");
-#         return undef;
-
-#     }
-#     sel(3, "  persona provided:");
-#     sel(3, "    {{$output}}");
-#     # Check if command succeeded and found files
-#     return undef if !defined $output || $output eq '';
-#     my @files = split /\n/, $output;
-#     return undef unless @files;
-#     if (@files > 1) {
-#         sel(1, "Multiple persona files found for '$preset_name':");
-#         sel(1, "  $_") for @files;
-#         sel(1, "Using first: $files[0]");
-#     }
-#     my $persona_file = $files[0];
-#     return undef unless -e $persona_file && -r $persona_file;
-#     sel(1, "Preset (persona file) found: $persona_file");
-#     my ($persona_name) = $persona_file =~ m|/([^/]+)$|;
-#     sel(1, "Preset persona name: $persona_name");
-#     my $content = $self->_load_file_preset($persona_file);
-#     sel(2, "Preset persona content length: " . length($content)) if defined $content;
-#     return $content;
-# }
-
-
 sub _get_system_content {
     my ($self) = @_;
 
     my $resolved = $self->{system_prompt}->resolve();
 
     if (!$resolved) {
-        sel(2, "No system source selected; system message will be empty");
+        sel(2, "No system source selected; using system default");
+        # Use system default
+        my $default = $self->{config}->get_effective_config()->{system_string};
+        return $default if $default;
         return undef;
     }
 
@@ -361,36 +388,58 @@ sub _get_system_content {
     sel(1, sprintf "Selected system source: %s %s=%s", $provenance, $source, $value);
 
     my $content;
+    my $meta = {};
 
     if ($source eq 'file') {
-        my $abs = $self->_resolve_system_file($value);
-        sel(2, "Resolved system_file => $abs");
-        $content = read_file($abs);
-        die "system-file '$abs' unreadable or empty\n" unless defined $content && $content ne '';
+        # Value should already be absolute path from resolution
+        my $abs_path = $value;
+        sel(2, "Using resolved system file: $abs_path");
+        $content = read_file($abs_path);
+        die "system-file '$abs_path' unreadable or empty\n" unless defined $content && $content ne '';
         sel(2, "Loaded system file length: " . length($content));
+        
+        # Load meta.yaml if it exists
+        $meta = $self->_load_meta_yaml($abs_path);
     }
     elsif ($source eq 'str') {
         my $len = defined($value) ? length($value) : 0;
-        sel(2, sprintf "Using system_str (len=%d)", $len);
+        sel(2, sprintf "Using system_string (len=%d)", $len);
         $content = $value // '';
         die "empty system string provided\n" if $content eq '';
     }
-	elsif ($source eq 'persona') {
-		my $ppath = $self->_resolve_persona_path($value);
-		if (!defined $ppath) {
-			swarnl 2, "persona was NOT resolved to a path";
-			die "persona '$value' not found (command failed or returned no results)\n" 
-				unless $self->{_fallbacks_ok};
-			# If fallbacks are OK, continue with undefined content
-		} else {
-			sel(2, "persona resolved => $ppath");
-			$content = read_file($ppath);
-			die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';
-			sel(2, "Loaded persona content length: " . length($content));
-		}
-	}
+    elsif ($source eq 'persona') {
+        my $ppath = $self->_resolve_persona_path($value);
+        if (!defined $ppath) {
+            if ($self->{_fallbacks_ok}) {
+                swarnl 2, "persona '$value' was NOT resolved to a path, using fallback";
+                return $self->_get_fallback_system_content();
+            } else {
+                die "persona '$value' not found (command failed or returned no results)\n";
+            }
+        } else {
+            sel(2, "persona resolved => $ppath");
+            $content = read_file($ppath);
+            die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';
+            sel(2, "Loaded persona content length: " . length($content));
+            
+            # Load meta.yaml if it exists
+            $meta = $self->_load_meta_yaml($ppath);
+        }
+    }
 
-    # Render Xslate variables if present (no concatenation)
+    # Apply thought pattern from meta.yaml if present
+    if ($meta->{thought_re} && $self->{_thought}{mode} eq 'auto') {
+        eval {
+            my $pattern = qr/$meta->{thought_re}/s;
+            $self->{_thought}{pattern} = $pattern;
+            sel(1, "Applied thought pattern from meta.yaml: $meta->{thought_re}");
+        };
+        if ($@) {
+            warn "Invalid regex in meta.yaml thought_re '$meta->{thought_re}': $@\n";
+        }
+    }
+
+    # Render Xslate variables if present
     if ($content) {
         # Collect system pins as template vars
         my $sys_pins_ar = $self->{pin_mgr}->get_system_pins();
@@ -413,6 +462,12 @@ sub _get_system_content {
 
     sel(2, "Final system content length: " . length($content)) if defined $content;
     return $content;
+}
+
+sub _get_fallback_system_content {
+    my ($self) = @_;
+    sel(1, "Using system fallback content");
+    return $self->{config}->get_effective_config()->{system_string};
 }
 
 sub _manage_context {
@@ -466,6 +521,16 @@ sub clear_pins {
 sub remove_pin {
     my ($self, $index) = @_;
     return $self->{pin_mgr}->remove_pin($index);
+}
+
+sub validate_pin_indices {
+    my ($self, @indices) = @_;
+    return $self->{pin_mgr}->validate_pin_indices(@indices);
+}
+
+sub update_pin {
+    my ($self, $index, $content) = @_;
+    return $self->{pin_mgr}->update_pin($index, $content);
 }
 
 # Configuration management
@@ -795,8 +860,6 @@ sub history_owrite_last($self, $payload, $optshro=undef) {
     return $self;
 }
 
-# Improved show_status method for ZChat with better error handling:
-
 sub show_status {
     my ($self, $verbose_level) = @_;
     $verbose_level //= 0;
@@ -900,8 +963,6 @@ sub _show_precedence_section {
     say "";
 }
 
-# Add this validation method to ZChat::Config:
-
 sub validate_status_display {
     my ($self) = @_;
     
@@ -918,7 +979,6 @@ sub validate_status_display {
         current_session => $self->get_session_name(),
     };
 }
-
 
 1;
 

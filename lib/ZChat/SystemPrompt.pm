@@ -78,12 +78,8 @@ sub resolve {
         sel(2, "Resolving CLI system_persona: $cfg->{_cli_system_persona}");
         return { source => 'persona', value => $cfg->{_cli_system_persona}, provenance => 'CLI' };
     }
-    if (defined $cfg->{_cli_system}) {
-        sel(2, "Resolving CLI system (auto): $cfg->{_cli_system}");
-        return $self->_resolve_auto($cfg->{_cli_system}, 'CLI');
-    }
     
-    # Check shell scope (new - between CLI and session)
+    # Check shell scope
     if (defined $cfg->{system_file_shell}) {
         sel(2, "Resolving shell system_file: $cfg->{system_file_shell}");
         return { source => 'file', value => $cfg->{system_file_shell}, provenance => 'SHELL' };
@@ -95,10 +91,6 @@ sub resolve {
     if (defined $cfg->{system_persona_shell}) {
         sel(2, "Resolving shell system_persona: $cfg->{system_persona_shell}");
         return { source => 'persona', value => $cfg->{system_persona_shell}, provenance => 'SHELL' };
-    }
-    if (defined $cfg->{system_shell}) {
-        sel(2, "Resolving shell system (auto): $cfg->{system_shell}");
-        return $self->_resolve_auto($cfg->{system_shell}, 'SHELL');
     }
     
     # Check session scope
@@ -114,10 +106,6 @@ sub resolve {
         sel(2, "Resolving session system_persona: $cfg->{system_persona_session}");
         return { source => 'persona', value => $cfg->{system_persona_session}, provenance => 'SESSION' };
     }
-    if (defined $cfg->{system_session}) {
-        sel(2, "Resolving session system (auto): $cfg->{system_session}");
-        return $self->_resolve_auto($cfg->{system_session}, 'SESSION');
-    }
     
     # Check user scope
     if (defined $cfg->{system_file_user}) {
@@ -132,9 +120,11 @@ sub resolve {
         sel(2, "Resolving user system_persona: $cfg->{system_persona_user}");
         return { source => 'persona', value => $cfg->{system_persona_user}, provenance => 'USER' };
     }
-    if (defined $cfg->{system_user}) {
-        sel(2, "Resolving user system (auto): $cfg->{system_user}");
-        return $self->_resolve_auto($cfg->{system_user}, 'USER');
+    
+    # System default - always has system_string
+    if (defined $cfg->{system_string}) {
+        sel(2, "Using system default string");
+        return { source => 'str', value => $cfg->{system_string}, provenance => 'SYSTEM' };
     }
     
     return undef;

@@ -375,17 +375,20 @@ sub _get_system_content {
         $content = $value // '';
         die "empty system string provided\n" if $content eq '';
     }
-    elsif ($source eq 'persona') {
-        my $ppath = $self->_resolve_persona_path($value);
-        if (!defined $ppath) {
-			swarnl 2, "persona was NOT resolved to a path"
+	elsif ($source eq 'persona') {
+		my $ppath = $self->_resolve_persona_path($value);
+		if (!defined $ppath) {
+			swarnl 2, "persona was NOT resolved to a path";
+			die "persona '$value' not found (command failed or returned no results)\n" 
+				unless $self->{_fallbacks_ok};
+			# If fallbacks are OK, continue with undefined content
 		} else {
 			sel(2, "persona resolved => $ppath");
 			$content = read_file($ppath);
 			die "persona file '$ppath' unreadable or empty\n" unless defined $content && $content ne '';
 			sel(2, "Loaded persona content length: " . length($content));
 		}
-    }
+	}
 
     # Render Xslate variables if present (no concatenation)
     if ($content) {

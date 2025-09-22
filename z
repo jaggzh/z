@@ -17,8 +17,8 @@ use ZChat::Storage;
 use ZChat::Config;
 use ZChat::Pin;
 use ZChat::Utils ':all';
+use ZChat::ansi ':all';
 
-use bansi;
 use Getopt::Long::Descriptive;
 # use Getopt::Long::Descriptive::Opts;
 use POSIX qw(strftime);

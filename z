@@ -800,9 +800,10 @@ exit if !$intmode;
 # my $response = $zchat->query($uprompt, { stream=>1 } ) if defined $uprompt;
 my $term;
 $term = Term::ReadLine->new("z") or die "Cannot create Term::ReadLine object";
-my $readline_histfile = "/tmp/zchat_readline-$user.json";
+my $readline_histfile = $zchat->{config}->get_readline_filename();
 $term->ReadHistory($readline_histfile) if -e $readline_histfile;
-# Set up terminal reset on enter
+
+# Set up color reset on enter
 $term->add_defun("accept-line", sub {
     my ($count, $key) = @_;
     print "$rst";
@@ -836,7 +837,8 @@ while (1) {
     tts_str($response) if $opt->play_resp; # TTSresponse
 }
 
-$term->write_history($readline_histfile);
+# Input history should always have been written immediately after valid input
+# $term->write_history($readline_histfile);
 exit;
 
 # Utility functions

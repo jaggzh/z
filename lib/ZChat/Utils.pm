@@ -5,6 +5,9 @@ use experimental 'signatures';
 use strict;
 use warnings;
 
+use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
+use Errno qw(EEXIST);
+
 use Exporter 'import';
 use File::Slurper qw(write_text read_text read_binary);
 use Encode qw(decode encode_utf8);
@@ -40,6 +43,7 @@ our @EXPORT_OK = qw(
 	$a_stat_actline $a_stat_actval $a_stat_acttag $a_stat_inactline
 	$a_stat_exists
 	$a_stat_undeftag
+	file_create_secure
 );
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
@@ -106,6 +110,44 @@ sub dumps($var) {
 	local $Data::Dumper::Terse  = 1;  # no $VAR1 =
 	local $Data::Dumper::Useqq  = 0;  # escaped strings
 	return Dumper($var);
+}
+
+# Secure file creation to prevent TOCTTOU race attacks
+# This prevents an attacker from creating the file between our check and creation
+sub file_create_secure($path, $mode=0660) {
+    # ATOMIC: Create file exclusively or fail - no race window
+    my $fh;
+    if (sysopen($fh, $path, O_WRONLY | O_CREAT | O_EXCL, $mode)) {
+        close($fh);
+        return 1; # We created it [with our mode] - safe to write sensitive data
+    }
+
+    # File existed upon creation - could be legitimate or an attack
+    if ($! == EEXIST) {
+        # Now we need to verify ownership before proceeding
+        my @stat = stat($path); # Even if removed and re-created, if it's owned by us it's ok
+        if (!@stat) {
+            serr "Couldn't stat existing file: $path: $!";
+            exit 1;
+        }
+        
+        if ($stat[4] != $<) {
+            serr "SECURITY: File ($path) owned by UID $stat[4], not us ($<). Possible attack?";
+            exit 1;
+        }
+        
+        # File exists and is owned by us - verify we can write
+        if (!open(my $fh, ">>", $path)) {
+            serr "Couldn't access our existing file: $path: $!";
+            exit 1;
+        }
+        close($fh);
+        return 0; # File already existed (and is safe)
+    }
+    
+    # Any other error is fatal
+    serr "Couldn't create file: $path: $!";
+    exit 1;
 }
 
 sub json_pretty_from_str_min($str) {

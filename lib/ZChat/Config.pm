@@ -280,7 +280,6 @@ sub store_session_config($self, $optshr) {
 
 sub _get_config_dir {
     my ($self) = @_;
-
     my $home = $ENV{HOME} || die "HOME environment variable not set";
     return File::Spec->catdir($home, '.config', 'zchat');
 }
@@ -294,6 +293,11 @@ sub _get_session_dir {
     my @session_parts = split('/', $self->{session_name});
 
     return File::Spec->catdir($config_dir, 'sessions', @session_parts);
+}
+
+sub get_readline_filename {
+    my ($self) = @_;
+    return File::Spec->catdir($self->_get_config_dir(), "readline_history.txt");
 }
 
 sub get_effective_config {
@@ -446,8 +450,8 @@ sub _get_shell_config_file {
     
     my $uid = $<;
     my $session_id = $self->_get_shell_session_id();
-    my $temp_dir = "/tmp/zchat-$uid";
-    return File::Spec->catfile($temp_dir, "shell-${session_id}.yaml");
+    my $filename = "/tmp/zchat-$uid-$session_id.yaml";
+    return $filename;
 }
 
 sub _load_shell_config {
@@ -455,15 +459,26 @@ sub _load_shell_config {
     
     my $shell_config_file = $self->_get_shell_config_file();
     sel 2, "Checking shell config: $shell_config_file";
-    return $self->{storage}->load_yaml($shell_config_file);
+    my @stat = stat($shell_config_file);
+    my $yaml;
+    if (@stat > 0) {
+        if ($stat[4] != $<) {
+            serr "ERROR: Shell session file is not owned by me! ($shell_config_file)";
+            exit 1;
+        } else {
+            $yaml = $self->{storage}->load_yaml($shell_config_file);
+        }
+    }
+    return $yaml; # undef if !-e
 }
 
 sub store_shell_config {
     my ($self, $optshr) = @_;
     
     my $shell_config_file = $self->_get_shell_config_file();
-    my $temp_dir = (File::Spec->splitpath($shell_config_file))[1];
-    make_path($temp_dir) unless -d $temp_dir;
+
+    # Errors out on failure to create but not if exists. Validates ownership.
+    file_create_secure($shell_config_file, 0660);
     
     # Shell config can store session name AND system prompt options
     my $config = {};

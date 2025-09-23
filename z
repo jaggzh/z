@@ -260,7 +260,7 @@ if ($opt->wipe || $opt->del_session) {
     $target_session = $opt->session // $ENV{ZCHAT_SESSION};
     
     # If still undefined, check shell config before we potentially wipe it
-    if (!defined $target_session && !$opt->wipe_pproc) {
+    if (!defined $target_session && !$opt->del_pproc) {
         # Only check shell config if we're not about to wipe it
         my $shell_file = ZChat::Config::get_shell_config_file($opt->set_pproc);
         if (-f $shell_file) {

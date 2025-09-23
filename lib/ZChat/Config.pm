@@ -481,20 +481,30 @@ sub store_shell_config {
     # Errors out on failure to create but not if exists. Validates ownership.
     file_create_secure($shell_config_file, 0660);
     
-    # Shell config can store session name AND system prompt options
-    my $config = {};
+    # Load existing shell config first to preserve existing values
+    my $existing = $self->_load_shell_config() || {};
     
-    # Always store session name
-    $config->{session} = $optshr->{session} if defined $optshr->{session};
+    # Store session name
+    $existing->{session} = $optshr->{session} if defined $optshr->{session};
     
-    # Store system prompt options if provided
-    $config->{system_string}  = $optshr->{system_string}  if defined $optshr->{system_string};
-    $config->{system_file}    = $optshr->{system_file}    if defined $optshr->{system_file};
-    $config->{system_persona} = $optshr->{system_persona} if defined $optshr->{system_persona};
-    $config->{system}         = $optshr->{system}         if defined $optshr->{system};
+    # If storing any system source, clear others in this scope
+    if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
+        defined $optshr->{system_persona} || defined $optshr->{system}) {
+        
+        # Clear all system sources in shell config
+        delete $existing->{system_string};
+        delete $existing->{system_file}; 
+        delete $existing->{system_persona};
+        delete $existing->{system};
+        
+        # Set the new one
+        for my $key (qw(system_string system_file system_persona system)) {
+            $existing->{$key} = $optshr->{$key} if defined $optshr->{$key};
+        }
+    }
     
     sel 1, "Saving shell session config: $shell_config_file";
-    return $self->{storage}->save_yaml($shell_config_file, $config);
+    return $self->{storage}->save_yaml($shell_config_file, $existing);
 }
 
 ## STATUS routines

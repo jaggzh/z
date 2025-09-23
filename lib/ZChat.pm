@@ -1053,6 +1053,15 @@ sub del_shell_config {
     return 1;
 }
 
+sub wipe_session_history {
+    my ($session_name) = @_;
+    
+    return 0 unless $session_name;
+    
+    # Create minimal storage object just for this operation
+    my $storage = ZChat::Storage->new();
+    return $storage->wipe_history($session_name);
+}
 
 sub get_resolved_cli_options {
     my ($self) = @_;

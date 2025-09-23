@@ -255,7 +255,7 @@ if (defined $opt->system_persona && $opt->system_persona eq '') {
 # Early session resolution before any wipe operations
 # Determine target session early, before any wipe operations that might affect resolution
 my $target_session;
-if ($opt->wipe || $opt->wipe_session) {
+if ($opt->wipe || $opt->del_session) {
     # Need to resolve session before wiping anything that affects resolution
     $target_session = $opt->session // $ENV{ZCHAT_SESSION};
     

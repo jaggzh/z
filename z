@@ -318,12 +318,14 @@ if ($opt->del_user) {
 
 # Parse input
 my $uprompt;
+my $opt_dash = 0;
 if (@ARGV) {
     if ($ARGV[0] eq '-') {
         local $/;
         undef $/;
         $uprompt = <STDIN>;
         $uprompt = decode('UTF-8', $uprompt, Encode::FB_QUIET);
+        $opt_dash = 1;
     } else {
         $uprompt = join(' ', @ARGV);
     }
@@ -879,7 +881,7 @@ if ($opt->edit_hist) {
 my $intmode = $opt->interactive;
 if (!$intmode && !defined $uprompt) {
     if ($non_query_acts++) {
-        if (!-t) {
+        if (!-t && !$opt_dash) {
             swarn "z: Input not from terminal but '-' not specified. ($non_query_acts actions have been performed.)";
         }
         exit; # They performed some actions deliberately. Exit silently.

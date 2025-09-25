@@ -126,7 +126,11 @@ sub _load_config($self, $optshro=undef) {
     if (defined $optshro->{system}) {
         my $resolved = $self->_resolve_and_narrow_system($optshro->{system}, 'CLI');
         if ($resolved) {
-            if ($resolved->{type} eq 'file') {
+            if ($resolved->{type} eq 'string') {
+                $resolved_cli{system_string} = $resolved->{value};
+                delete $resolved_cli{system};
+                sel(1, "CLI --system resolved to system_string: $resolved->{value}");
+			} elsif ($resolved->{type} eq 'file') {
                 $resolved_cli{system_file} = $resolved->{value};
                 delete $resolved_cli{system};
                 sel(1, "CLI --system resolved to system_file: $resolved->{value}");
@@ -138,7 +142,7 @@ sub _load_config($self, $optshro=undef) {
         } else {
             # Resolution failed
             if ($self->{_fallbacks_ok}) {
-                swarn "System '$optshro->{system}' could not be resolved, removing from CLI options";
+                swarn "System '$optshro->{system}' could not be auto-resolved, removing from CLI options and checking stored precedences.";
                 delete $resolved_cli{system};
             } else {
                 die "System '$optshro->{system}' could not be resolved\n";
@@ -169,10 +173,16 @@ sub _load_config($self, $optshro=undef) {
 sub _resolve_and_narrow_system {
     my ($self, $name, $source) = @_;
 
-    sel(2, "Resolving --system '$name' from $source");
+    sel(1, "Resolving --system '$name' from $source");
 
-    # Check if it's obviously intended as a path (absolute or contains ..)
-    my $is_obvious_path = ($name =~ m#^/# || $name =~ m#\.\.#);
+	# Auto-detect assumes spaces mean it's a string.
+    if ($name =~ /\S\s\S/) {
+        sel(1, "System auto-detected: Has spaces. Is system-string.");
+        return { type => 'string', value => $name };
+	}
+
+    # Check if it's obviously intended as a path (absolute or contains "..")
+    my $is_obvious_path = ($name =~ m#^/# || $name =~ m#/\.\.|\.\./#);
 
     if ($is_obvious_path) {
         sel(2, "Treating '$name' as path only (absolute or contains ..)");

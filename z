@@ -182,15 +182,28 @@ if ($opt->help) {
     print $pager <<~'EOT';
 
         Basic usage:
+        $ z "My query" # LLM output to stdout. History stored in 'default'
+          # (~/.config/zchat/sessions/default/history.json)
+        $ z -w  # Wiped history (ie. deleted ^ 'default' history file)
+        $ z -H "My query" # One-off query; no history read or written
+        $ z -n pets/rufus "what's a balanced diet..."
+          # (Created ~/.config/zchat/sessions/pets/spot/history.json)
+        $ z -n myprj/ui --system "Always answer in one-line" --sp
+          # Stored session name and a temporary system prompt in ^^ my shell.
+          # (But didn't perform a query.)
+          # --system, with type not specified, auto-detected the spaces
+          #      as a string. --system-file "My Assistant.txt" specifies.
 
         Select or create 'myprj' session, store it active in the
          current shell session group, and perform a query, which will
          be stored in 'myprj' chat history.
         $ z -n myprj --sp -- "What's a SID and Session Group Leader?"
+         # session *name* stored in /tmp/zchat-{uid}-{sid}.{sgpid}.yaml
+         # history in ~/.config/zchat/sessions/myprj/history.json
 
         Same, but subdirs can be used
-        $ z -n myprj/subprj --sp -- "Help me"
-        $ z -n myprj -- "One-time use of myprj, not saved."
+        $ z -n myprj2 -- "Hist stored in 'myprj2', but only for this call."
+          # (Created ~/.config/zchat/sessions/default/history.json)
 
         Store 'default' as user global session (to be used when session
          is not specified or not set with --sp in the current shell.
@@ -866,9 +879,13 @@ if ($opt->edit_hist) {
 my $intmode = $opt->interactive;
 if (!$intmode && !defined $uprompt) {
     if ($non_query_acts++) {
+        if (!-t) {
+            swarn "z: Input not from terminal but '-' not specified. ($non_query_acts actions have been performed.)";
+        }
         exit; # They performed some actions deliberately. Exit silently.
     } else {
-        die "${bred}No query provided. See -h or use -i for interactive mode.$rst\n";
+        swarn "No query provided. See -h or use -i for interactive mode.";
+        exit;
     }
 }
 

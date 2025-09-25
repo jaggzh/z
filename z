@@ -2,6 +2,8 @@
 # Re-run in debugger if...
 exec($^X, '-d', "$0", grep {!/^--debug$/} @ARGV) if grep {/^--debug$/} @ARGV;
 
+my $VERSION = "0.8b";
+
 use v5.26.3;
 use feature 'say';
 use experimental 'signatures';
@@ -172,6 +174,7 @@ my ($opt, $usage) = describe_options(
     [ 'help-pins',          "Show detailed help for pinning" ],
     [ 'help-cli',           "CLI use - Basic", ],
     [ 'help-cli-adv',       "cli use - Advanced", ],
+    [ 'version',            "Show version ($VERSION)", ],
 );
 
 @ARGV = map { decode('UTF-8', $_) } @ARGV;
@@ -179,9 +182,8 @@ my ($opt, $usage) = describe_options(
 if ($opt->help) {
     my $pager = pager();
     print $pager ($usage->text);
+    print $pager "\n\nBasic usage (Version: $VERSION):\n";
     print $pager <<~'EOT';
-
-        Basic usage:
         $ z "My query" # LLM output to stdout. History stored in 'default'
           # (~/.config/zchat/sessions/default/history.json)
         $ z -w  # Wiped history (ie. deleted ^ 'default' history file)

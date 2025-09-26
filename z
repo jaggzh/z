@@ -170,7 +170,8 @@ my ($opt, $usage) = describe_options(
 	[ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
 	[],
 	[ help_sec('Tools (new, experimental):') ],
-    [ 'tool-result=s@',     "Inject tool result: --tool-result 'name:data' or 'id:name:data'" ],
+    [ 'tool-result=s@',     "Inject tool result: --tool-result 'name:data' or '[id]name:data'" ],
+    [ 'append-tool-calls',  "Append structured tool calls to assistant content as TOOL_CALL lines" ],
 	[],
 	[ help_sec('Help:') ],
     [ 'help-sys-pin-vars',  "Show quick example of template vars to use for system pins", ],
@@ -237,19 +238,20 @@ $verbose_resp = $opt->verbose_resp;
 # This may be set to 0 if tokens are counted
 # Process tool results for passing to query
 my $tool_results;
-if ($opt->tool_result && @{$opt->tool_result}) {
+if ($opt->tool_result && scalar(@{$opt->tool_result})) {
     $tool_results = [];
     for my $result_spec (@{$opt->tool_result}) {
         my ($tool_id, $tool_name, $data);
+        sel 3, "Parsing provided tool result: $cya$result_spec$rst";
         
         # Handle both formats: "name:data" and "id:name:data"
-        if ($result_spec =~ /^([^:]+):([^:]+):(.+)$/) {
+        if ($result_spec =~ /^\[([^:\]]+)\]:([^:]+):(.+)$/s) {
             ($tool_id, $tool_name, $data) = ($1, $2, $3);
-        } elsif ($result_spec =~ /^([^:]+):(.+)$/) {
+        } elsif ($result_spec =~ /^([^:]+):(.+)$/s) {
             ($tool_name, $data) = ($1, $2);
             $tool_id = undef;
         } else {
-            die "${bred}ERROR: Invalid tool result format. Use: name:data or id:name:data$rst\n";
+            die "${bred}ERROR: Invalid tool result format. Use: name:data or [id]name:data: $red$result_spec$rst\n";
         }
         
         push @$tool_results, {
@@ -258,10 +260,11 @@ if ($opt->tool_result && @{$opt->tool_result}) {
             id => $tool_id
         };
         
-        sel 1, "Parsed tool result: $tool_name" . (defined $tool_id ? " (ID: $tool_id)" : "");
+        sel 1, "Parsed tool result: [Tool name]: $cya$tool_name$rst" . (defined $tool_id ? " ([ID]: $cya$tool_id$rst)" : "");
     }
 }
-my $has_tool_results = $opt->tool_result && @{$opt->tool_result};
+my $has_tool_results = $tool_results && scalar(@$tool_results);
+
 
 if ($opt->help_pins) { show_help_file('pins.md'); exit; }
 if ($opt->help_cli) { show_help_file('cli.md'); exit; }
@@ -518,8 +521,6 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
 
 $zchat->set_print(1); # Module default is silent.
 
-if ($opt->status) { $zchat->show_status($verbose); exit; }
-
 # This is redundant. zchat->new is handling this (or at least it should be)
 # Also, these aren't used for later resolution so they fail to serve their primary purpose anyway.
 # This area should be removed entirely (according to claude).
@@ -582,7 +583,7 @@ if ($opt->list_sys) {
 }
 
 # Count query or tool call bodies (estimated)
-if ($opt->token_count || $has_tool_results) {
+if ($opt->token_count || $opt->tokens_full) {
     my $input_text;
     if (defined $uprompt) {
         $input_text = $uprompt; 
@@ -931,16 +932,18 @@ if ($opt->edit_hist) {
     exit;
 }
 
+if ($opt->status) { $zchat->show_status($verbose); exit; }
+
 # Validate we have input for completion
 my $intmode = $opt->interactive;
-if (!$intmode && !defined $uprompt) {
+if (!$intmode && !defined $uprompt && !$has_tool_results) {
     if ($non_query_acts++) {
         if (!-t && !$opt_dash) {
             swarn "z: Input not from terminal but '-' not specified. ($non_query_acts actions have been performed.)";
         }
         exit; # They performed some actions deliberately. Exit silently.
     } else {
-        swarn "No query provided. See -h or use -i for interactive mode.";
+        swarn "No query or tool-results provided. See -h or use -i for interactive mode";
         exit;
     }
 }

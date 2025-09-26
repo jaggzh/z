@@ -36,6 +36,7 @@ sub new {
         system       => $opts{system},
         system_prompt=> $opts{system_prompt},
         system_file  => $opts{system_file},
+        system_string=> $opts{system_string},
         pin_shims    => $opts{pin_shims},
         override_pproc=> $opts{override_pproc},
         config       => undef,

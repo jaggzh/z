@@ -169,6 +169,9 @@ my ($opt, $usage) = describe_options(
 	[ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: concat)" ],
 	[ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
 	[],
+	[ help_sec('Tools (new, experimental):') ],
+    [ 'tool-result=s@',     "Inject tool result: --tool-result 'name:data' or 'id:name:data'" ],
+	[],
 	[ help_sec('Help:') ],
     [ 'help-sys-pin-vars',  "Show quick example of template vars to use for system pins", ],
     [ 'help-pins',          "Show detailed help for pinning" ],
@@ -182,7 +185,7 @@ my ($opt, $usage) = describe_options(
 if ($opt->help) {
     my $pager = pager();
     print $pager ($usage->text);
-    print $pager "\n\nBasic usage (Version: $VERSION):\n";
+    print $pager "\nBasic usage (Version: $VERSION):\n";
     print $pager <<~'EOT';
         $ z "My query" # LLM output to stdout. History stored in 'default'
           # (~/.config/zchat/sessions/default/history.json)
@@ -230,6 +233,35 @@ if ($opt->help) {
 $verbose = $opt->verbose;
 set_verbose($verbose); # In Utils
 $verbose_resp = $opt->verbose_resp;
+
+# This may be set to 0 if tokens are counted
+# Process tool results for passing to query
+my $tool_results;
+if ($opt->tool_result && @{$opt->tool_result}) {
+    $tool_results = [];
+    for my $result_spec (@{$opt->tool_result}) {
+        my ($tool_id, $tool_name, $data);
+        
+        # Handle both formats: "name:data" and "id:name:data"
+        if ($result_spec =~ /^([^:]+):([^:]+):(.+)$/) {
+            ($tool_id, $tool_name, $data) = ($1, $2, $3);
+        } elsif ($result_spec =~ /^([^:]+):(.+)$/) {
+            ($tool_name, $data) = ($1, $2);
+            $tool_id = undef;
+        } else {
+            die "${bred}ERROR: Invalid tool result format. Use: name:data or id:name:data$rst\n";
+        }
+        
+        push @$tool_results, {
+            name => $tool_name,
+            data => $data,
+            id => $tool_id
+        };
+        
+        sel 1, "Parsed tool result: $tool_name" . (defined $tool_id ? " (ID: $tool_id)" : "");
+    }
+}
+my $has_tool_results = $opt->tool_result && @{$opt->tool_result};
 
 if ($opt->help_pins) { show_help_file('pins.md'); exit; }
 if ($opt->help_cli) { show_help_file('cli.md'); exit; }
@@ -316,7 +348,7 @@ if ($opt->del_user) {
     $non_query_acts++;
 }
 
-## END-WIPING
+## END-WIPING/DELETING
 
 # Parse input
 my $uprompt;
@@ -359,6 +391,9 @@ if (defined $uprompt) {
 #     }
 # }
 
+
+
+
 # Handle images and clipboard
 my @image_data;
 my $use_images = 0;
@@ -379,6 +414,11 @@ if ($opt->clipboard) {
     } else {
         die "${bred}ERROR: Unsupported clipboard content$rst\n";
     }
+}
+
+if ($has_tool_results && defined $uprompt && length $uprompt) {
+    serr "Tool results (tool role) and query (user role) cannot be done simultaneously.";
+    exit 1;
 }
 
 if ($opt->image) {
@@ -541,26 +581,38 @@ if ($opt->list_sys) {
     exit;
 }
 
-if ($opt->token_count) {
-    my $input_text = $uprompt // '';
-    if ($input_text eq '') {
-        say 1;  # Empty input = 1 token
+# Count query or tool call bodies (estimated)
+if ($opt->token_count || $has_tool_results) {
+    my $input_text;
+    if (defined $uprompt) {
+        $input_text = $uprompt; 
+    } elsif ($has_tool_results) {
+        $input_text = join("\n\n", $opt->tool_result);
+        swarnl 1, "Counting tool call tokens may be inaccurate if we handle formatting.";
     } else {
-        my $token_count = $zchat->{core}->count_tokens($input_text);
-        say $token_count;
+        serr "Token count requested without input (user query or --tool-result)";
+        exit 1;
     }
-    $non_query_acts++;
-    $uprompt = undef;
-}
-
-if ($opt->tokens_full) {
-    my $input_text = $uprompt // '';
-    die "${bred}No input text provided$rst\n" if $input_text eq '';
-    
-    my @tokens = $zchat->{core}->tokenize($input_text, { with_pieces => 1 });
-    my $json = JSON::XS->new->utf8->canonical(1)->encode(\@tokens);
-    say $json;
-    $non_query_acts++;
+    if ($opt->token_count) {
+        if ($input_text eq '') {
+            say 1;  # Empty input = 1 token
+        } else {
+            my $token_count = $zchat->{core}->count_tokens($input_text);
+            say $token_count;
+        }
+        $non_query_acts++;
+    }
+    if ($opt->tokens_full) {
+        my $input_text = $uprompt // '';
+        die "${bred}No input text provided$rst\n" if $input_text eq '';
+        
+        my @tokens = $zchat->{core}->tokenize($input_text, { with_pieces => 1 });
+        my $json = JSON::XS->new->utf8->canonical(1)->encode(\@tokens);
+        say $json;
+        $non_query_acts++;
+    }
+    if (defined $uprompt) { $uprompt = undef; }
+    else { $has_tool_results = 0; }
 }
 
 if ($opt->ctx) {
@@ -901,12 +953,28 @@ if (!$intmode || $opt->no_color) {
 
 if (defined $uprompt && length $uprompt) {
     tts_str($uprompt) if $opt->play_user;
-    my $response = $zchat->query($uprompt, { stream=>1 } );
+
+    my $query_opts = { stream => 1 };
+    $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
+    $query_opts->{tool_results} = $tool_results if $tool_results;
+    my $response = $zchat->query($uprompt, $query_opts);
+
     if ($opt->play_resp) {
         eval { play_tts($response) };   # or whatever your fn is called
         warn "Audio error: $@" if $@;
     }
+} elsif ($has_tool_results) {
+    my $query_opts = { stream => 1 };
+    $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
+    $query_opts->{tool_results} = $tool_results;
+    my $response = $zchat->query("", $query_opts);
+
+    if ($opt->play_resp) {
+        eval { play_tts($response) };
+        warn "Audio error: $@" if $@;
+    }
 }
+
 
 exit if !$intmode;
 

@@ -68,6 +68,7 @@ sub append {
     my ($self, $role, $content, $meta) = @_;
     die "append: role required" unless defined $role && length $role;
     die "append: content required" unless defined $content;
+    die "append: invalid role '$role'" unless $role =~ /^(user|assistant|system|tool)$/;
     
     my $next_id = @{$self->{_messages}} ? ($self->{_messages}[-1]{id} || 0) + 1 : 1;
     

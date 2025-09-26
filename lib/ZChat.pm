@@ -727,7 +727,30 @@ sub query($self, $user_text, $optshro=undef) {
     );
 
     my @context   = @{ $self->{history}->messages() // [] };
-    my @messages  = (@$pins_msgs, @context, { role => 'user', content => $user_text });
+
+    # Add tool results to context if provided
+    if ($optshro->{tool_results}) {
+        for my $tool_result (@{$optshro->{tool_results}}) {
+            my $meta = { tool_name => $tool_result->{name} };
+            $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
+            
+            push @context, {
+                role => 'tool',
+                content => $tool_result->{data},
+                meta => $meta,
+                ts => time,
+                id => (@context ? ($context[-1]{id} || 0) + 1 : 1),
+            };
+        }
+    }
+    
+    # Build message array - handle tool-only vs user query cases
+    my @messages = (@$pins_msgs, @context);
+    
+    # Add user message only if we have user text
+    if (defined $user_text && $user_text ne '') {
+        push @messages, { role => 'user', content => $user_text };
+    }
 
     # Add system message if we have content
     if ($system_content) {
@@ -749,7 +772,8 @@ sub query($self, $user_text, $optshro=undef) {
         my $result = $self->{core}->complete_request(\@messages, {
             stream => 1,
             on_chunk => $cb,
-            fallbacks_ok => $self->{_fallbacks_ok}
+            fallbacks_ok => $self->{_fallbacks_ok},
+            append_tool_calls => $optshro->{append_tool_calls}
         });
 
         # Extract content and metadata from result
@@ -764,7 +788,8 @@ sub query($self, $user_text, $optshro=undef) {
     } else {
         my $result = $self->{core}->complete_request(\@messages, {
             stream => 0,
-            fallbacks_ok => $self->{_fallbacks_ok}
+            fallbacks_ok => $self->{_fallbacks_ok},
+            append_tool_calls => $optshro->{append_tool_calls}
         });
 
         # Extract content and metadata

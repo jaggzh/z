@@ -133,6 +133,7 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
     my $token_count = 0;
     my $buffer = '';
     my $usage_info = {};
+    my @collected_tool_calls;
 
     $tx->res->content->unsubscribe('read')->on(read => sub {
         my ($content, $bytes) = @_;
@@ -163,8 +164,13 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
                     $usage_info = $decoded->{usage};
                 }
 
-                # Check for completion
+                # Collect tool calls for appending
                 my $choice = $decoded->{choices}[0];
+                if ($optshro->{append_tool_calls} && $choice->{delta} && $choice->{delta}{tool_calls}) {
+                    push @collected_tool_calls, @{$choice->{delta}{tool_calls}};
+                }
+
+                # Check for completion
                 last if $choice->{finish_reason};
 
                 # Extract content from delta
@@ -188,6 +194,28 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
 
     # Execute request
     $ua->start($tx);
+
+    # Append collected tool calls if requested
+    if ($optshro->{append_tool_calls} && @collected_tool_calls) {
+        my $tool_calls_text = '';
+        for my $tool_call (@collected_tool_calls) {
+            if ($tool_call->{function}) {
+                my $tool_json = encode_json({
+                    id => $tool_call->{id},
+                    name => $tool_call->{function}{name},
+                    arguments => $tool_call->{function}{arguments}
+                });
+                $tool_calls_text .= "\nTOOL_CALL: $tool_json";
+            }
+        }
+        
+        if ($tool_calls_text) {
+            $answer .= $tool_calls_text;
+            if ($on_chunk) {
+                $on_chunk->($tool_calls_text);
+            }
+        }
+    }
 
     # Return both content and metadata
     return {
@@ -224,6 +252,21 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
     my $content = $response->{choices}[0]{message}{content} || '';
     my $usage = $response->{usage} || {};
     my $choice = $response->{choices}[0] || {};
+
+    # Handle tool calls appending if requested
+    if ($optshro->{append_tool_calls}) {
+        my $tool_calls = $response->{choices}[0]{message}{tool_calls};
+        if ($tool_calls && @$tool_calls) {
+            for my $tool_call (@$tool_calls) {
+                my $tool_json = encode_json({
+                    id => $tool_call->{id},
+                    name => $tool_call->{function}{name},
+                    arguments => $tool_call->{function}{arguments}
+                });
+                $content .= "\nTOOL_CALL: $tool_json";
+            }
+        }
+    }
 
     # Post-process if needed
     my $remove_pattern = $optshro->{remove_pattern};

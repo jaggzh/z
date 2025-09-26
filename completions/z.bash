@@ -72,53 +72,71 @@ __z_collect_presets() {
 __z_opts() {
   cat <<'OPTS'
 -h --help
--v --verbose
---verbose_resp --vr
---image --img
---clipboard --cb
+-v --verbose --verbose_resp --vr
+--image --img --clipboard --cb
 -i --interactive --int
--e --echo1
---echo-delineated --echod --ee
+-e --echo1 --echo-delineated --echod --ee
 -r --raw
 --tokens_full
 -T --token_count
---ctx
---metadata
+--ctx --metadata
 -P --n_predict
 --pu --play_user
 --pr --play_resp
 --probs
 --no-color --nc
 -g --grammar
--p --preset
--t --tasktype
--n --session
+--think --thought
+
+--session -n
+--store-user --su -S
+--store-session --ss
+--store-pproc --sp
+
+--system-string --system-str --sstr
+--system-file --sfile
+--system-persona --spersona --persona
+--system --sys -s
+
+
+--del-user --du
+--del-session --ds
+--del-pproc --del-shell --dp
+
+--clear-system-user --csu --cS
+--clear-system-session --css
+--clear-system-pproc --clear-system-shell --csp
+
+--clear-session-user --cssu --cssS
+--clear-session-pproc --clear-session-shell --cssp
+
 -w --wipe
+--wipeold --wipeexp --we --wo
 -H --no-history
 -I --input-only
 -E --edit-hist --eh
---su --S --store-user
---store-session --ss
---store-ppid --sp
---system --sys -s
---system-file --sfile
---system-string --sstr
---system-persona --spersona --persona
---think --thought
+--owrite-last
+--conv-last --cl
+--output-last --ol
+
 -L --list-sys --sys-list
 --fallbacks-ok
+--status --stat
+
 --help-pins
 --pin
---pin-file
---pin-list
---pin-sum
+--pins-file
+--pins-list
+--pins-sum
+--pins-cnt
 --pin-sum-len
 --pin-write
---pin-clear
+--pins-clear
 --pin-rm
 --pins-sys-max
 --pins-user-max
 --pins-ast-max
+
 --pin-sys
 --pin-user
 --pin-ast
@@ -128,10 +146,20 @@ __z_opts() {
 --pins-clear-ast
 --pins-clear-sys
 --pin-shim
---pin-sys-mode
+--pin-tpl-user
+--pin-tpl-ast
+--pin-mode-sys
+--pin-mode-user
+--pin-mode-ast
+
+--tool-result
+--append-tool-calls
+
 --help-sys-pin-vars
---output-last --conv1 --c1
---ol
+--help-pins
+--help-cli
+--help-cli-adv
+--version
 
 OPTS
 }

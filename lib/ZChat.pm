@@ -905,7 +905,7 @@ sub show_status {
     my $def_abbr_sysstr = 30;
 
     # Load the configuration if not already loaded
-    $self->{config}->load_effective_config();
+    $self->{config}->load_effective_config($self->{_resolved_cli_options});
 
     my $status_info = eval { $self->{config}->get_status_info() };
     if ($@) {

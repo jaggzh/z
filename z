@@ -337,7 +337,8 @@ if ($opt->del_session) {
     ZChat::del_session_config($target_session) or die "Failed to delete session: $!";
     sel 1, "Deleted session '$target_session'";
     $non_query_acts++;
-}
+} else {
+    if ($opt->clear_system_session) { $zchat->clear_system_session() }
 
 if ($opt->del_pproc) {
     ZChat::del_shell_config($opt->set_pproc) or die "Failed to delete shell config: $!";
@@ -349,6 +350,8 @@ if ($opt->del_user) {
     ZChat::del_user_config() or die "Failed to delete user config: $!";
     sel 1, "Deleted user global config";
     $non_query_acts++;
+} else {
+    if ($opt->clear_system_user) { $zchat->clear_system_user() }
 }
 
 ## END-WIPING/DELETING

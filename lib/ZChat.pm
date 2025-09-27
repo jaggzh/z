@@ -823,9 +823,22 @@ sub query($self, $user_text, $optshro=undef) {
     }
 
     # Store in history with metadata
-    $self->{history}->append('user', $user_text, {
-        request_time => $response_metadata->{request_time} || time,
-    });
+    if (defined $user_text && $user_text ne '') {
+        $self->{history}->append('user', $user_text, {
+            request_time => $response_metadata->{request_time} || time,
+        });
+    }
+    
+    # Store tool results in history if provided
+    if ($optshro->{tool_results}) {
+        for my $tool_result (@{$optshro->{tool_results}}) {
+            my $meta = { tool_name => $tool_result->{name} };
+            $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
+            
+            $self->{history}->append('tool', $tool_result->{data}, $meta);
+        }
+    }
+    
     $self->{history}->append('assistant', $response_text, $response_metadata);
     $self->{history}->save();
 

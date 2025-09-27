@@ -985,7 +985,7 @@ if (defined $uprompt && length $uprompt) {
     my $query_opts = { stream => 1 };
     $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
     $query_opts->{tool_results} = $tool_results;
-    my $response = $zchat->query("", $query_opts);
+    my $response = $zchat->query(undef, $query_opts);
 
     if ($opt->play_resp) {
         eval { play_tts($response) };

@@ -326,7 +326,7 @@ sub _ensure_alternating_roles {
 
     for my $msg (@$messages) {
         # Skip system messages for alternating logic
-        if ($msg->{role} eq 'system') {
+        if ($msg->{role} eq 'system' || $msg->{role} eq 'tool') {
             push @result, $msg;
             next;
         }

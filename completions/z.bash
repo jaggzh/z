@@ -103,12 +103,12 @@ __z_opts() {
 --del-session --ds
 --del-pproc --del-shell --dp
 
---clear-system-user --csu --cS
---clear-system-session --css
---clear-system-pproc --clear-system-shell --csp
+--clear-user-system --cus
+--clear-session-system --cns
+--clear-pproc-system --clear-shell-system --cps
 
---clear-session-user --cssu --cssS
---clear-session-pproc --clear-session-shell --cssp
+--clear-user-session --cun
+--clear-pproc-session --clear-shell-session --cpn
 
 -w --wipe
 --wipeold --wipeexp --we --wo

@@ -1018,50 +1018,48 @@ sub validate_status_display {
     };
 }
 
-sub clear_system_user {
+sub clear_user_system {
     my ($self) = @_;
     my $config = $self->{config}->_load_user_config() || {};
     delete $config->{system_string};
     delete $config->{system_file};
     delete $config->{system_persona};
     delete $config->{system};
-    return $self->{config}->store_user_config($config);
+    return $self->{config}->store_user_config($config, { owrite => 1 } );
 }
 
-sub clear_system_session {
+sub clear_session_system {
     my ($self) = @_;
     my $config = $self->{config}->_load_session_config() || {};
     delete $config->{system_string};
     delete $config->{system_file};
     delete $config->{system_persona};
     delete $config->{system};
-    return $self->{config}->store_session_config($config);
+    return $self->{config}->store_session_config($config, { owrite => 1 } );
+}
+sub clear_session_user {
+    my ($self) = @_;
+    my $config = $self->{config}->_load_user_config() || {};
+    delete $config->{session};
+    return $self->{config}->store_user_config($config, { owrite => 1 } );
 }
 
-sub clear_system_shell {
+sub clear_shell_session {
+    my ($self) = @_;
+    my $config = $self->{config}->_load_shell_config() || {};
+    delete $config->{session};
+    return $self->{config}->store_shell_config($config, { owrite => 1 } );
+}
+sub clear_shell_system {
     my ($self) = @_;
     my $config = $self->{config}->_load_shell_config() || {};
     delete $config->{system_string};
     delete $config->{system_file};
     delete $config->{system_persona};
     delete $config->{system};
-    # Keep session name if it exists
-    return $self->{config}->store_shell_config($config);
+    return $self->{config}->store_shell_config($config, { owrite => 1 } );
 }
 
-sub clear_session_user {
-    my ($self) = @_;
-    my $config = $self->{config}->_load_user_config() || {};
-    delete $config->{session};
-    return $self->{config}->store_user_config($config);
-}
-
-sub clear_session_shell {
-    my ($self) = @_;
-    my $config = $self->{config}->_load_shell_config() || {};
-    delete $config->{session};
-    return $self->{config}->store_shell_config($config);
-}
 
 sub del_user_config {
     my $config_file = ZChat::Config::get_user_config_path();

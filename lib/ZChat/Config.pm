@@ -206,77 +206,103 @@ sub _load_session_config {
     return $yaml;
 }
 
-sub store_user_config($self, $optshr) {
+sub store_user_config {
+    my ($self, $optshr, $foptshro) = @_;
+    $foptshro ||= {};
+
     my $config_dir = $self->_get_config_dir();
     make_path($config_dir) unless -d $config_dir;
 
     my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
 
-    # Load existing config
-    my $existing = $self->_load_user_config() || {};
+    my $config_to_save;
+    
+    if ($foptshro->{owrite}) {
+        # Full overwrite mode - use exactly what was passed
+        $config_to_save = { %$optshr };
+        delete $config_to_save->{owrite};  # Remove the flag itself
+    } else {
+        # Merge mode (current behavior)
+        my $existing = $self->_load_user_config() || {};
+        $config_to_save = $existing;
 
-    for my $key (qw(session system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
-        if (defined $optshr->{$key}) {
-            $existing->{$key} = $optshr->{$key};
+        for my $key (qw(session system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
+            if (defined $optshr->{$key}) {
+                $config_to_save->{$key} = $optshr->{$key};
+            }
         }
-    }
-    if (defined $optshr->{pin_shims}) {
-        $existing->{pin_shims} = $optshr->{pin_shims};
+        if (defined $optshr->{pin_shims}) {
+            $config_to_save->{pin_shims} = $optshr->{pin_shims};
+        }
     }
 
     sel 1, "Saving user config as YAML at: $user_config_file";
-    return $self->{storage}->save_yaml($user_config_file, $existing);
+    return $self->{storage}->save_yaml($user_config_file, $config_to_save);
 }
 
-sub store_session_config($self, $optshr) {
+sub store_session_config {
+    my ($self, $optshr, $foptshro) = @_;
+    $foptshro ||= {};
+
     my $session_dir = $self->{storage}->get_session_dir($self->{session_name});
     make_path($session_dir) unless -d $session_dir;
 
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
 
-    # Use cached session config if available, otherwise load it
-    my $existing = $self->{_session_config_cache} || $self->_load_session_config() || {};
+    my $config_to_save;
+    
+    if ($foptshro->{owrite}) {
+        # Full overwrite mode - use exactly what was passed
+        $config_to_save = { %$optshr };
+        delete $config_to_save->{owrite};  # Remove the flag itself
+        # Add created timestamp if new
+        $config_to_save->{created} = time() unless exists $config_to_save->{created};
+    } else {
+        # Merge mode (current behavior)
+        my $existing = $self->{_session_config_cache} || $self->_load_session_config() || {};
+        $config_to_save = $existing;
 
-    # Add created timestamp if new
-    $existing->{created} = time() unless exists $existing->{created};
+        # Add created timestamp if new
+        $config_to_save->{created} = time() unless exists $config_to_save->{created};
 
-    # If storing any system source, clear others in this scope
-    if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
-        defined $optshr->{system_persona} || defined $optshr->{system}) {
-        
-        # Clear all system sources in session config
-        delete $existing->{system_string};
-        delete $existing->{system_file}; 
-        delete $existing->{system_persona};
-        delete $existing->{system};
-        
-        # Set the new one
-        for my $key (qw(system_string system_file system_persona system)) {
-            $existing->{$key} = $optshr->{$key} if defined $optshr->{$key};
-        }
-    }
-
-    # Update with new values
-    for my $key (qw(system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
-        if (defined $optshr->{$key}) {
-            if (($optshr->{$key} // '') eq '') {
-                sel 1, "Clearing $key in session config";
-                delete $existing->{$key};
-            } else {
-                $existing->{$key} = $optshr->{$key};
-                sel 1, "Storing $key = $$optshr{$key} in session config";
+        # If storing any system source, clear others in this scope
+        if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
+            defined $optshr->{system_persona} || defined $optshr->{system}) {
+            
+            # Clear all system sources in session config
+            delete $config_to_save->{system_string};
+            delete $config_to_save->{system_file}; 
+            delete $config_to_save->{system_persona};
+            delete $config_to_save->{system};
+            
+            # Set the new one
+            for my $key (qw(system_string system_file system_persona system)) {
+                $config_to_save->{$key} = $optshr->{$key} if defined $optshr->{$key};
             }
         }
-    }
-    if (defined $optshr->{pin_shims}) {
-        $existing->{pin_shims} = $optshr->{pin_shims};
+
+        # Update with new values
+        for my $key (qw(system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
+            if (defined $optshr->{$key}) {
+                if (($optshr->{$key} // '') eq '') {
+                    sel 1, "Clearing $key in session config";
+                    delete $config_to_save->{$key};
+                } else {
+                    $config_to_save->{$key} = $optshr->{$key};
+                    sel 1, "Storing $key = $$optshr{$key} in session config";
+                }
+            }
+        }
+        if (defined $optshr->{pin_shims}) {
+            $config_to_save->{pin_shims} = $optshr->{pin_shims};
+        }
     }
 
     # Update cache with new values
-    $self->{_session_config_cache} = $existing;
+    $self->{_session_config_cache} = $config_to_save;
 
     sel 1, "Saving session config as YAML at: $session_config_file";
-    return $self->{storage}->save_yaml($session_config_file, $existing);
+    return $self->{storage}->save_yaml($session_config_file, $config_to_save);
 }
 
 sub _get_config_dir {
@@ -474,37 +500,47 @@ sub _load_shell_config {
 }
 
 sub store_shell_config {
-    my ($self, $optshr) = @_;
+    my ($self, $optshr, $foptshro) = @_;
+    $foptshro ||= {};
     
     my $shell_config_file = $self->_get_shell_config_file();
 
     # Errors out on failure to create but not if exists. Validates ownership.
     file_create_secure($shell_config_file, 0660);
-    
-    # Load existing shell config first to preserve existing values
-    my $existing = $self->_load_shell_config() || {};
-    
-    # Store session name
-    $existing->{session} = $optshr->{session} if defined $optshr->{session};
-    
-    # If storing any system source, clear others in this scope
-    if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
-        defined $optshr->{system_persona} || defined $optshr->{system}) {
+
+    my $config_to_save;
+
+    if ($foptshro->{owrite}) {
+        # Full overwrite mode - use exactly what was passed
+        $config_to_save = { %$optshr };
+        delete $config_to_save->{owrite};  # Remove the flag itself
+    } else {
+        # Merge mode (current behavior)
+        my $existing = $self->_load_shell_config() || {};
+        $config_to_save = $existing;
         
-        # Clear all system sources in shell config
-        delete $existing->{system_string};
-        delete $existing->{system_file}; 
-        delete $existing->{system_persona};
-        delete $existing->{system};
+        # Store session name
+        $config_to_save->{session} = $optshr->{session} if defined $optshr->{session};
         
-        # Set the new one
-        for my $key (qw(system_string system_file system_persona system)) {
-            $existing->{$key} = $optshr->{$key} if defined $optshr->{$key};
+        # If storing any system source, clear others in this scope
+        if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
+            defined $optshr->{system_persona} || defined $optshr->{system}) {
+            
+            # Clear all system sources in shell config
+            delete $config_to_save->{system_string};
+            delete $config_to_save->{system_file}; 
+            delete $config_to_save->{system_persona};
+            delete $config_to_save->{system};
+            
+            # Set the new one
+            for my $key (qw(system_string system_file system_persona system)) {
+                $config_to_save->{$key} = $optshr->{$key} if defined $optshr->{$key};
+            }
         }
     }
     
     sel 1, "Saving shell session config: $shell_config_file";
-    return $self->{storage}->save_yaml($shell_config_file, $existing);
+    return $self->{storage}->save_yaml($shell_config_file, $config_to_save);
 }
 
 ## STATUS routines

@@ -110,21 +110,26 @@ my ($opt, $usage) = describe_options(
     [ 'system-persona|spersona|persona=s', "Set system prompt by persona name (resolved by persona tool)" ],
     [ 'system|sys|s=s',     "Auto-resolve through -file then -persona (but does NOT accept a string)" ],
     [],
-    [ help_sec('Deleting things (but see History wipe next section)') ],
+    [ help_sec('Deleting things (but see History wipe section)') ],
     [ 'del-user|du', "Wipe (delete) entire user global config" ],
     [ 'del-session|ds', "Wipe (delete) entire session (history, pins, settings, ..)" ],
     [ 'del-pproc|del-shell|dp', "Wipe (delete) shell-tied config" ],
     [],
-    [ 'clear-system-user|csu|cS', "Clear system prompts from user global config" ],
-    [ 'clear-system-session|css', "Clear system prompts from current session config" ],
-    [ 'clear-system-pproc|clear-system-shell|csp', "Clear from shell-tied config" ],
-    [ "Note: The above options allow you to clear at one level while assigning a new one runtime OR storing it during the same run." ],
-    [ "  e.g. '--csp --system-file data/coder.txt --sp'" ],
+
+    [ help_sec('Clearing individual settings. These are done AFTER other settings establish the active priorities.') ],
+    [ 'clear-user-system|cus', "Clear system prompts from user global config" ],
+    [ 'clear-user-session|cun', "Clear session name from user global config" ],
+
+    [ 'clear-session-system|cns', "Clear system prompts from current session config" ],
+
+    [ 'clear-pproc-system|clear-shell-system|cps', "Clear from shell-tied config" ],
+    [ 'clear-pproc-session|clear-shell-session|cpn', "Clear session name from shell-tied config" ],
+
+    [ " Note: The above options allow you to clear at one level while assigning a new one runtime OR storing it during the same run." ],
+    [ "  e.g. '--cps --system-file data/coder.txt --sp'" ],
+    [ ' Note: You can\'t store a session name in a session. :)' ],
     [],
-    [ 'clear-session-user|cssu|cssS', "Clear session name from user global config" ],
-    [ 'clear-session-pproc|clear-session-shell|cssp', "Clear session name from shell-tied config" ],
-    [ 'Note: You can\'t store a session name in a session. :)' ],
-    [],
+
     [ help_sec('History:') ],
     [ 'wipe|w',             "Wipe conversation history" ],
     [ 'wipeold|wipeexp|we|wo=s',  "Wipe/expire msgs older than {FLOAT TIME}[smhdwMyY] (e.g. 1.5h)" ],
@@ -337,8 +342,7 @@ if ($opt->del_session) {
     ZChat::del_session_config($target_session) or die "Failed to delete session: $!";
     sel 1, "Deleted session '$target_session'";
     $non_query_acts++;
-} else {
-    if ($opt->clear_system_session) { $zchat->clear_system_session() }
+}
 
 if ($opt->del_pproc) {
     ZChat::del_shell_config($opt->set_pproc) or die "Failed to delete shell config: $!";
@@ -350,8 +354,6 @@ if ($opt->del_user) {
     ZChat::del_user_config() or die "Failed to delete user config: $!";
     sel 1, "Deleted user global config";
     $non_query_acts++;
-} else {
-    if ($opt->clear_system_user) { $zchat->clear_system_user() }
 }
 
 ## END-WIPING/DELETING
@@ -574,6 +576,16 @@ if ($opt->wipe) {
     sel 1, "${yel}Removed $removed_count messages older than $opt->wipeold$rst";
     $non_query_acts++;
 }
+
+# Clearing of individual fields in precedence items
+# This may not be optimum if deletion of full pproc/session/user
+# are done, but our precedence resolution might have kicked in.
+# In the future we could possibly compare if values matched.
+if ($opt->clear_session_system) { $zchat->clear_session_system(); $non_query_acts++ }
+if ($opt->clear_pproc_system) { $zchat->clear_shell_system(); $non_query_acts++ }
+if ($opt->clear_pproc_session) { $zchat->clear_shell_session(); $non_query_acts++ }
+if ($opt->clear_user_system) { $zchat->clear_user_system(); $non_query_acts++ }
+if ($opt->clear_user_session) { $zchat->clear_user_session(); $non_query_acts++ }
 
 # Utility: list system prompts
 if ($opt->list_sys) {

@@ -3,6 +3,7 @@ SRCFILES=\
 		z \
 		lib/ZChat.pm \
 		lib/ZChat/Utils.pm \
+		lib/ZChat/ContextManager.pm \
 		lib/ZChat/Storage.pm \
 		lib/ZChat/Config.pm \
 		lib/ZChat/Core.pm \

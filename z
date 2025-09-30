@@ -18,6 +18,7 @@ use ZChat;
 use ZChat::Storage;
 use ZChat::Config;
 use ZChat::Pin;
+use ZChat::ContextManager;
 use ZChat::Utils ':all';
 use ZChat::ansi ':all';
 
@@ -86,6 +87,7 @@ my ($opt, $usage) = describe_options(
     [ 'tokens-full',        "Output tokens of input text" ],
     [ 'token-count|T',      "Count tokens in input text" ],
     [ 'ctx',                "Get running model n_ctx" ],
+    [ 'ctx-info',           "Get running model context - Detailed" ],
     [ 'metadata',           "Get running model metadata" ],
     [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
     [ 'play-user|pu',       "Play user text with TTS" ],
@@ -644,6 +646,24 @@ if ($opt->metadata) {
     }
     $non_query_acts++;
 }
+
+if ($opt->ctx_info) {
+    my $ctx_mgr = ZChat::ContextManager->new(core => $zchat->{core});
+    my $n_ctx = $ctx_mgr->get_model_context_size();
+    my $model = $zchat->{core}->get_model_name();
+    
+    say "Model: $model";
+    say "Context size: $n_ctx tokens";
+    say "Usable (85%): " . int($n_ctx * 0.85) . " tokens";
+    
+    my $cache = $ctx_mgr->{cache}{"ratio_$model"};
+    if ($cache) {
+        say "Char/token ratio: " . sprintf("%.2f", $cache->{ratio});
+        say "Based on $cache->{samples} samples";
+    }
+    exit;
+}
+
 
 # Pin management commands
 if ($opt->pins_list) {

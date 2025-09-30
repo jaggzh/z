@@ -714,6 +714,11 @@ sub query($self, $user_text, $optshro=undef) {
         sel 2, "Forcing non-streaming mode for reasoning pattern filtering";
     }
 
+    # Initialize context manager if needed
+    $self->{context_mgr} //= ZChat::ContextManager->new(
+        core => $self->{core}
+    );
+
     # Build messages using the complete template functionality
     my $shims = $self->{config}->get_pin_shims();
     my $pins_msgs = $self->{pin_mgr}->build_message_array_with_shims(
@@ -728,6 +733,13 @@ sub query($self, $user_text, $optshro=undef) {
     );
 
     my @context   = @{ $self->{history}->messages() // [] };
+
+    # Fit messages to context
+    my $fitted_context = $self->{context_mgr}->fit_messages_to_context(
+        \@context,
+        $system_content,
+        $pins_msgs
+    );
 
     # Add tool results to context if provided
     if ($optshro->{tool_results}) {
@@ -841,6 +853,14 @@ sub query($self, $user_text, $optshro=undef) {
     
     $self->{history}->append('assistant', $response_text, $response_metadata);
     $self->{history}->save();
+
+    if ($response_metadata->{tokens_total}) {
+        my $total_input_text = join("\n", map { $_->{content} } @messages);
+        $self->{context_mgr}->update_ratio_from_actual(
+            $total_input_text,
+            $response_metadata->{tokens_input}
+        );
+    }
 
     return $response_text;
 }

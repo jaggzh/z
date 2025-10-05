@@ -11,6 +11,8 @@ use JSON::XS;
 use LWP::UserAgent;
 use HTTP::Request;
 use Encode qw(decode encode_utf8);
+use URI;
+use URI::Escape qw(uri_escape);
 
 use ZChat::Utils ':all';
 
@@ -293,6 +295,119 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
 
 sub get_model_info {
     my ($self) = @_;
+
+    return $self->{model_info} if $self->{model_info_loaded};
+
+    # Backend disabled explicitly
+    return undef if exists $self->{backend} && defined $self->{backend} && $self->{backend} eq '';
+
+    my $backend = $self->{backend};
+    my $host    = $self->{host_url} // '';
+    my $model   = $self->{model};          # expected model id/name for ollama/openai
+    my ($method, $url, $body) = ('GET', undef, undef);
+
+    # Decide endpoint + method per backend
+    if (!defined $backend || $backend eq 'llama.cpp') {
+        # llama.cpp server exposes /props (GET)
+        # Example: http://localhost:8080/props
+        $url = "$host/props";
+        $method = 'GET';
+    }
+    elsif ($backend eq 'ollama') {
+        # Ollama /api/show is POST with { name }
+        # Example: http://127.0.0.1:11434/api/show
+        $url = "$host/api/show";
+        $method = 'POST';
+        $body = encode_json({ name => $model // '' });
+    }
+    elsif ($backend eq 'openai') {
+        # OpenAI: use Models API
+        # Prefer model-specific retrieve if a model id is configured
+        # Example host: https://api.openai.com
+        if (defined $model && length $model) {
+            my $m = uri_escape($model);
+            $url = "$host/v1/models/$m";
+        } else {
+            $url = "$host/v1/models";   # falls back to listing, you can pick one later
+        }
+        $method = 'GET';
+    }
+    else {
+        $backend //= "Undefined";
+        swarnl(0, "Unknown backend '$backend'. Use 'llama.cpp', 'ollama', 'openai', or leave unset.");
+        return undef;
+    }
+
+    sel 1, "get_model_info() hitting $url";
+    my $ua = LWP::UserAgent->new(timeout => 10);
+
+    # Build request and headers
+    my $req = HTTP::Request->new($method, $url);
+    my $headers = $self->_build_headers_for($backend);
+    for my $hn (keys %$headers) { $req->header($hn => $headers->{$hn}); }
+    if (defined $body) {
+        $req->content_type('application/json');
+        $req->content($body);
+    }
+
+    my $res = $ua->request($req);
+    unless ($res->is_success) {
+        sel(2, "Model info fetch failed from $url: " . $res->status_line);
+        $self->{model_info_loaded} = 1;
+        $self->{model_info} = undef;
+        return undef;
+    }
+
+    my $data = eval { decode_json($res->decoded_content) };
+    if ($@) {
+        sel(2, "JSON decode error from $url: $@");
+        $self->{model_info_loaded} = 1;
+        $self->{model_info} = undef;
+        return undef;
+    }
+
+    # Normalize into a common shape if you like (optional)
+    # e.g., convert OpenAI list => pick by id, etc.
+    if ($backend && $backend eq 'openai' && ref($data) eq 'HASH' && exists $data->{data}) {
+        # /v1/models list; optionally select by $model
+        if ($model) {
+            ($data) = grep { $_->{id} && $_->{id} eq $model } @{$data->{data}};
+            $data //= { error => "model '$model' not found in /v1/models" };
+        }
+    }
+
+    $self->{model_info} = $data;
+    $self->{model_info_loaded} = 1;
+    return $data;
+}
+
+# Build per-backend auth headers cleanly
+sub _build_headers_for {
+    my ($self, $backend) = @_;
+    my %h = %{ $self->_build_headers() // {} };  # keep your existing headers
+
+    if (!defined $backend || $backend eq 'llama.cpp') {
+        # llama.cpp may require an API key if configured on the server:
+        # you'll typically add: $h{'X-Api-Key'} = $self->{llama_api_key} if present.
+        return \%h;
+    }
+    if ($backend eq 'ollama') {
+        # Usually none; add if you front it with a proxy
+        return \%h;
+    }
+    if ($backend eq 'openai') {
+        my $key = $self->{openai_api_key} // $ENV{OPENAI_API_KEY};
+        $h{Authorization} = "Bearer $key" if defined $key;
+        # Optional:
+        $h{'OpenAI-Organization'} = $self->{openai_org}     if $self->{openai_org};
+        $h{'OpenAI-Project'}      = $self->{openai_project} if $self->{openai_project};
+        return \%h;
+    }
+    return \%h;
+}
+
+sub get_model_info_old_rm {
+    my ($self) = @_;
 	# Undefined backend will try llama.cpp then ollama
 	# "" disables the hits entirely
 
@@ -307,7 +422,9 @@ sub get_model_info {
 	# If it's undefined we try each...
     if (!defined $backend || $backend eq 'llama.cpp') {
         $url = "$$self{host_url}/props";
-    } elsif (!defined $backend || $backend eq 'ollama') {
+    } elsif ($backend eq 'ollama') {
+        $url = "$$self{host_url}/api/show";
+    } elsif ($backend eq 'openai') {
         $url = "$$self{host_url}/api/show";
     } else {
     	$backend //= "Undefined"; 
@@ -431,10 +548,19 @@ sub get_model_name {
 
 sub get_model_key {
     my ($self) = @_;
-    my $backend = $self->{backend} // 'unknown';
+    my $backend = $self->{backend} // $self->_detect_backend();
     my $base    = _normalize_base_with_v1($self->{api_base} // '');
     my $model   = $self->get_model_name() || 'unknown';
     return join(':', $backend, $base, $model);
+}
+
+sub _detect_backend {
+    my ($self) = @_;
+    # If api_base looks like an HTTP(S) URL, prefer openai-style backend detection,
+    # even if llama env vars exist.
+    my $base = $self->{api_base} // '';
+    return 'openai' if $base =~ m{^https?://}i;
+    return $self->{backend} // 'llama.cpp';
 }
 
 # Test connection
@@ -481,18 +607,30 @@ sub _first_defined {
     return undef;
 }
 
+# sub _normalize_base_with_v1 {
+#     my ($u) = @_;
+#     $u ||= 'http://127.0.0.1:8080';
+#     $u =~ s{\s+}{}g;
+#     $u = "http://$u" unless $u =~ m{^https?://}i;
+#     $u =~ s{/$}{};
+#     $u =~ s{/v1$}{};
+#     return "$u/v1";
+# }
+
 sub _normalize_base_with_v1 {
-    my ($u) = @_;
-    $u ||= 'http://127.0.0.1:8080';
-    $u =~ s{\s+}{}g;
-    $u = "http://$u" unless $u =~ m{^https?://}i;
-    $u =~ s{/$}{};
-    $u =~ s{/v1$}{};
-    return "$u/v1";
+    my ($raw) = @_;
+    return '' unless defined $raw && length $raw;
+    my $u = eval { URI->new($raw) } || return $raw;
+    my $origin = $u->scheme . '://' . $u->host;
+    $origin .= ':' . $u->port if defined $u->port && $u->port !~ /^(?:80|443)$/;
+    # Force a canonical trailing /v1
+    return $origin . '/v1';
 }
+
 
 sub _resolve_backend {
     my ($opt_val) = @_;
+    $DB::single=1;
     my $backend = _first_defined(
     	$opt_val,
     	$ENV{ZCHAT_BACKEND},

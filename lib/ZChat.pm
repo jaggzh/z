@@ -40,6 +40,7 @@ sub new {
         system_string=> $opts{system_string},
         pin_shims    => $opts{pin_shims},
         override_pproc=> $opts{override_pproc},
+        backend      => $opts{backend},
         config       => undef,
         core         => undef,
         storage      => undef,
@@ -81,7 +82,10 @@ sub new {
         config => $self->{config}
     );
 
-    $self->{core} = ZChat::Core->new();
+    $DB::single=1;
+    $self->{core} = ZChat::Core->new(
+		backend => $self->{backend},
+	);
 
     return $self;
 }
@@ -461,7 +465,8 @@ sub _get_system_content {
         my $sys_pins_ar = $self->{pin_mgr}->get_system_pins();
         my $pins_str    = join("\n", @$sys_pins_ar);
         my $tpl = Text::Xslate->new(type=>'text', verbose=>0);
-        my $modelname = $self->{core}->get_model_info()->{name} // 'unknown-model';
+        my $modelname =
+			( $self->{core}->get_model_info() // {} )->{name} // 'unknown-model';
         my $now = time;
         my $pin_cnt = $self->{pin_mgr}->get_pin_count("system");
         my $vars = {
@@ -896,19 +901,6 @@ sub query($self, $user_text, $optshro=undef) {
     return $response_text;
 }
 
-sub set_allow_fallbacks {
-    my ($self, $v) = @_;
-    $self->{_fallbacks_ok} = $v ? 1 : 0;
-    return $self;
-}
-
-sub set_print($self, $target) {
-    my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
-    my $print_fh = _validate_print_opt($target);
-    $self->{_print_target} = $print_fh;
-    return $self;
-}
-
 sub on_chunk_set {
     my ($self, $cb) = @_;
     $self->{_on_chunk} = $cb;
@@ -1184,8 +1176,25 @@ sub set_model_cmax {
         swarnl 0, "cmax=$n looks unusual (expected ~$lower..$upper); proceeding as requested";
     }
     my $key = $self->{core}->get_model_key();
+    if ($key =~ /:unknown$/) {
+        swarnl 0, "model id could not be resolved; storing cmax under placeholder key: $key";
+    }
     $self->{context_mgr}->set_persistent_max_ctx($key, $n);
     return $self;
 }
+
+sub set_allow_fallbacks {
+    my ($self, $v) = @_;
+    $self->{_fallbacks_ok} = $v ? 1 : 0;
+    return $self;
+}
+
+sub set_print($self, $target) {
+    my $accept_msg = "We accept 0 (disable), 1 (*STDOUT), or a valid open file handle.";
+    my $print_fh = _validate_print_opt($target);
+    $self->{_print_target} = $print_fh;
+    return $self;
+}
+
 
 1;

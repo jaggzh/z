@@ -89,6 +89,7 @@ my ($opt, $usage) = describe_options(
     [ 'ctx',                "Get running model n_ctx" ],
     [ 'ctx-info',           "Get running model context - Detailed" ],
     [ 'metadata',           "Get running model metadata" ],
+    [ 'backend=s',          "Use with --max-ctx and possibly other URL/API selection features" ],
     [ 'stats-usage',        "Print usage stats to stderr after each request" ],
     [ 'stats-usage-fmt=s',  "Format for --stats-usage (pretty|json)", { default => 'pretty' } ],
     [ 'max-ctx|ctx-hard|chard||cmax=i', "Set persistent hard max context for this model (global, non-overridable)" ],
@@ -474,6 +475,7 @@ my $zchat = ZChat->new(
     system => $opt->system,
     stats_usage => $opt->stats_usage,
     stats_usage_fmt => ($opt->stats_usage_fmt // 'pretty'),
+    backend => $opt->backend,
 );
 
 if ($opt->max_ctx) {
@@ -656,8 +658,6 @@ if ($opt->ctx) {
     my $n_ctx = $ctx_mgr->get_model_context_size();
     say $n_ctx;
     $non_query_acts++;
-    $n_ctx = $zchat->{core}->get_n_ctx(); # might be old. leaving so it'll error
-    swarn "WE HAVE A POTENTIALLY OLD get_n_ctx() CALL HERE AFTER ADDING SERVER MAX CTX";
 }
 
 if ($opt->metadata) {

@@ -89,6 +89,9 @@ my ($opt, $usage) = describe_options(
     [ 'ctx',                "Get running model n_ctx" ],
     [ 'ctx-info',           "Get running model context - Detailed" ],
     [ 'metadata',           "Get running model metadata" ],
+    [ 'stats-usage',        "Print usage stats to stderr after each request" ],
+    [ 'stats-usage-fmt=s',  "Format for --stats-usage (pretty|json)", { default => 'pretty' } ],
+    [ 'max-ctx|ctx-hard|chard||cmax=i', "Set persistent hard max context for this model (global, non-overridable)" ],
     [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
     [ 'play-user|pu',       "Play user text with TTS" ],
     [ 'play-resp|pr',       "Play response text with TTS" ],
@@ -145,7 +148,8 @@ my ($opt, $usage) = describe_options(
     [ help_sec('Utility:') ],
     [ 'list-sys|sys-list|L', "List available file and 'persona'-based system prompts." ],
     [ 'fallbacks-ok',       "OK to use fallbacks if things fail" ],
-    [ 'status|stat',        "Show current configuration status and precedence" ],
+    [ 'status|stat|st',     "Show current configuration status and precedence" ],
+    [ 'print-session-dir|pssd', "Print just the resolved session path (used by completion/shell-tools.sh). --st for full details" ],
     [],
     [ help_sec('Message pinning (see --help-pins):') ],
     [ 'pin=s@',             "Add pinned message(s)" ],
@@ -233,6 +237,15 @@ if ($opt->help) {
         Provide a path to the system prompt, and store it default in
          the 'cat-talk' session.
         $ z --system-file here/sys.txt --ss -n cat-talk -- "And a query."
+
+        Environment examined in this priority:
+          URL:
+          LLAMA_URL     LLAMA_API_URL    LLAMACPP_SERVER  LLAMA_CPP_SERVER
+           LLM_API_URL  OPENAI_BASE_URL  OPENAI_API_BASE  OPENAI_URL
+
+          API Key:
+          LLAMA_API_KEY  OPENAI_API_KEY  AZURE_OPENAI_API_KEY
+
         EOT
     pagerdone($pager);
     exit;
@@ -459,8 +472,13 @@ my $zchat = ZChat->new(
     system_file => $opt->system_file,
     system_persona => $opt->system_persona,
     system => $opt->system,
+    stats_usage => $opt->stats_usage,
+    stats_usage_fmt => ($opt->stats_usage_fmt // 'pretty'),
 );
 
+if ($opt->max_ctx) {
+    $zchat->set_model_cmax($opt->max_ctx);
+}
 
 # Apply configuration/storage changes early (before any blocking/editor work)
 if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
@@ -634,9 +652,12 @@ if ($opt->token_count || $opt->tokens_full) {
 }
 
 if ($opt->ctx) {
-    my $n_ctx = $zchat->{core}->get_n_ctx();
+    my $ctx_mgr = ZChat::ContextManager->new(core => $zchat->{core});
+    my $n_ctx = $ctx_mgr->get_model_context_size();
     say $n_ctx;
     $non_query_acts++;
+    $n_ctx = $zchat->{core}->get_n_ctx(); # might be old. leaving so it'll error
+    swarn "WE HAVE A POTENTIALLY OLD get_n_ctx() CALL HERE AFTER ADDING SERVER MAX CTX";
 }
 
 if ($opt->metadata) {
@@ -968,6 +989,7 @@ if ($opt->edit_hist) {
 }
 
 if ($opt->status) { $zchat->show_status($verbose); exit; }
+if ($opt->print_session_dir) { $zchat->show_status(0, { session_dir=>1 } ); exit; }
 
 # Validate we have input for completion
 my $intmode = $opt->interactive;

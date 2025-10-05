@@ -13,6 +13,7 @@ use Text::Xslate;
 use POSIX;
 use Cwd qw(abs_path);
 use File::Basename qw(dirname);
+use JSON::XS;
 
 use ZChat::Core;
 use ZChat::Config;
@@ -44,6 +45,8 @@ sub new {
         storage      => undef,
         pin_mgr      => undef,
         history      => undef,
+        stats_usage  => ($opts{stats_usage} // 0),
+        stats_usage_fmt => ($opts{stats_usage_fmt} // 'pretty'),
         _thought     => { mode => 'auto', pattern => undef }, # mode: auto|disabled|enabled
         _fallbacks_ok => 0,
         _print_target    => undef,   # undef (silent) | *FH
@@ -862,6 +865,34 @@ sub query($self, $user_text, $optshro=undef) {
         );
     }
 
+	if ($self->{stats_usage}) {
+		my $fmt = ($self->{stats_usage_fmt} // 'pretty');
+		my $model_key = $self->{core}->get_model_key();
+		my $ctx_max = $self->{context_mgr}->get_model_context_size();
+		my $in  = $response_metadata->{tokens_input}  // 0;
+		my $out = $response_metadata->{tokens_output} // 0;
+		my $tot = $response_metadata->{tokens_total}  // ($in + $out);
+		my $lat_ms = int(1000 * ($response_metadata->{response_time} // 0));
+		my $ctx_used = $in || $self->{core}->estimate_message_tokens(\@messages);
+		my $pct = ($ctx_max && $ctx_used) ? (100 * $ctx_used / $ctx_max) : 0;
+		if ($fmt eq 'json') {
+			say STDERR encode_json({
+				model => $model_key,
+				input => 0 + $in,
+				output => 0 + $out,
+				total => 0 + $tot,
+				ctx_used => 0 + $ctx_used,
+				ctx_max  => 0 + $ctx_max,
+				ctx_pct  => 0.0 + sprintf("%.3f", $pct),
+				latency_ms => 0 + $lat_ms,
+				estimated => $in ? JSON::XS::false : JSON::XS::true,
+			});
+		} else {
+			say STDERR "stats: model=$model_key, input=$in, output=$out, total=$tot, ctx_used=$ctx_used/$ctx_max (" .
+				($ctx_max ? sprintf('%.1f', $pct) : '0.0') . "%), latency_ms=$lat_ms";
+		}
+	}
+
     return $response_text;
 }
 
@@ -931,9 +962,10 @@ sub history_owrite_last($self, $payload, $optshro=undef) {
     return $self;
 }
 
-sub show_status {
-    my ($self, $verbose_level) = @_;
+sub show_status($self, $verbose_level, $optshro={}) {
+	# $optshro->{session_dir}: Show just the session directory
     $verbose_level //= 0;
+    my $show_session_dir = $optshro->{session_dir} // 0;
 
     my $def_abbr_sysstr = 30;
 
@@ -945,6 +977,12 @@ sub show_status {
         serr "Failed to collect status information: $@";
         return;
     }
+
+	# Only show requested session directory
+    if ($show_session_dir) {
+		say $status_info->{file_locations}{SESSION};
+		return;
+	}
 
     # Header
     say "${a_stat_actline}ZChat Configuration Status$rst";
@@ -968,7 +1006,7 @@ sub show_status {
         my $source_data = $status_info->{sources}{$source_name};
         next unless $source_data && keys %$source_data;
 
-        my $location = $status_info->{file_locations}{$source_name} || '';
+        my $location = $status_info->{file_locations}{$source_name} // '';
         say "  - $source_name" . ($location ? ": $location" : "");
 
         # Show file existence status for file-based sources
@@ -1137,40 +1175,17 @@ sub get_resolved_cli_options {
     return $self->{_resolved_cli_options} || {};
 }
 
+sub set_model_cmax {
+    my ($self, $n) = @_;
+    $self->{context_mgr} //= ZChat::ContextManager->new(core => $self->{core});
+    my $lower = 512;
+    my $upper = 4_000_000;
+    if ($n < $lower || $n > $upper) {
+        swarnl 0, "cmax=$n looks unusual (expected ~$lower..$upper); proceeding as requested";
+    }
+    my $key = $self->{core}->get_model_key();
+    $self->{context_mgr}->set_persistent_max_ctx($key, $n);
+    return $self;
+}
+
 1;
-
-__END__
-
-=head1 NAME
-
-ZChat - Perl interface to LLM chat completions with session management
-
-=head1 SYNOPSIS
-
-    use ZChat;
-
-    # Simple usage
-    my $z = ZChat->new();
-    my $response = $z->complete_request("Hello, how are you?");
-
-    # With session and preset
-    my $z = ZChat->new(
-        session => "myproject/analysis",
-        preset => "helpful-assistant"
-    );
-
-    # Pin management
-    $z->pin("You are an expert in Perl programming.");
-    $z->pin("Use code blocks for examples.", role => 'user');
-    my $pins = $z->list_pins();
-
-    # Configuration storage. old.. needs updating
-    $z->store_user_config({ preset => "default" });
-    $z->store_session_config({preset => "coding-assistant"});
-
-=head1 DESCRIPTION
-
-ZChat provides a clean interface to LLM APIs with session management,
-conversation history, pinned messages, and preset system prompts.
-
-=cut

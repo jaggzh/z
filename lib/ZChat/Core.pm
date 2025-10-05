@@ -429,6 +429,14 @@ sub get_model_name {
     return $self->_extract_model_name($props);
 }
 
+sub get_model_key {
+    my ($self) = @_;
+    my $backend = $self->{backend} // 'unknown';
+    my $base    = _normalize_base_with_v1($self->{api_base} // '');
+    my $model   = $self->get_model_name() || 'unknown';
+    return join(':', $backend, $base, $model);
+}
+
 # Test connection
 sub ping {
     my ($self) = @_;
@@ -522,8 +530,8 @@ sub _resolve_api_base {
 
 sub _resolve_api_key {
     return _first_defined(
-        $ENV{OPENAI_API_KEY},
         $ENV{LLAMA_API_KEY},
+        $ENV{OPENAI_API_KEY},
         $ENV{AZURE_OPENAI_API_KEY},
     );
 }

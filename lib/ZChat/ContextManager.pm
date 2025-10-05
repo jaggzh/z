@@ -7,6 +7,8 @@ use File::Path qw(make_path);
 use File::Spec;
 use YAML::XS qw(LoadFile DumpFile);
 
+use ZChat::Utils ':all';
+
 sub new {
     my ($class, %opts) = @_;
     
@@ -20,14 +22,17 @@ sub new {
     my $self = {
         core => ($opts{core} // die "core required"),
         cache_file => File::Spec->catfile($config_dir, 'model_cache.yaml'),
+        models_file => File::Spec->catfile($config_dir, 'models.yaml'),
         char_token_ratio => 3.5,  # Default estimate: 3.5 chars per token
         safety_margin => 0.85,    # Use 85% of context to leave room for response
         min_history_messages => 4, # Keep at least last 2 exchanges
         cache => {},              # Initialize empty cache
+        models => {},             # Persistent per-model settings (non-expiring)
     };
     
     bless $self, $class;
     $self->_load_cache();
+    $self->_load_models();
     return $self;
 }
 
@@ -54,11 +59,42 @@ sub _save_cache {
     warn "Failed to save cache: $@\n" if $@;
 }
 
+sub _load_models {
+    my ($self) = @_;
+    return unless -f $self->{models_file};
+    eval {
+        $self->{models} = LoadFile($self->{models_file}) || {};
+    };
+    if ($@) {
+        warn "Failed to load models: $@\n";
+        $self->{models} = {};
+    }
+}
+
+sub _save_models {
+    my ($self) = @_;
+    eval {
+        DumpFile($self->{models_file}, $self->{models});
+    };
+    warn "Failed to save models: $@\n" if $@;
+}
+
 sub get_model_context_size {
     my ($self) = @_;
     
     my $model_name = $self->{core}->get_model_name();
     my $cache_key = "ctx_$model_name";
+    my $model_key = eval { $self->{core}->get_model_key() } // $model_name;
+
+    if (my $forced = $self->{models}{$model_key}{max_ctx}) {
+        $self->{cache}{$cache_key} = {
+            n_ctx => $forced,
+            timestamp => time,
+            model => $model_name,
+        };
+        $self->_save_cache();
+        return $forced;
+    }
     
     # Check cache first (valid for 24 hours)
     if (my $cached = $self->{cache}{$cache_key}) {
@@ -79,6 +115,15 @@ sub get_model_context_size {
     $self->_save_cache();
     
     return $n_ctx;
+}
+
+sub set_persistent_max_ctx {
+    my ($self, $model_key, $n) = @_;
+    $self->{models}{$model_key} = {
+        max_ctx => int($n),
+        set_at  => time,
+    };
+    $self->_save_models();
 }
 
 sub estimate_tokens {

@@ -122,6 +122,7 @@ __z_opts() {
 -L --list-sys --sys-list
 --fallbacks-ok
 --status --stat
+--print-session-dir --pssd
 
 --help-pins
 --pin

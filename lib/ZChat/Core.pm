@@ -24,6 +24,7 @@ sub new {
         api_key  => _first_defined($opts{api_key}, _resolve_api_key()),
         fallback_api_key => $opts{fallback_api_key} // 'na',
         backend  => _resolve_backend($opts{backend}),
+        model  => $opts{model},
         model_info => undef,
         model_info_loaded => 0,
         host_url => '', # Derived from api_base without URI
@@ -302,21 +303,22 @@ sub get_model_info {
     return undef if exists $self->{backend} && defined $self->{backend} && $self->{backend} eq '';
 
     my $backend = $self->{backend};
-    my $host    = $self->{host_url} // '';
-    my $model   = $self->{model};          # expected model id/name for ollama/openai
+    my $host_in = $self->{api_base} // $self->{host_url} // '';
+    my $base    = _normalize_base_with_v1($host_in);
+    my $model   = $self->{model};          # expected model id/name (if provided)
     my ($method, $url, $body) = ('GET', undef, undef);
 
     # Decide endpoint + method per backend
     if (!defined $backend || $backend eq 'llama.cpp') {
         # llama.cpp server exposes /props (GET)
         # Example: http://localhost:8080/props
-        $url = "$host/props";
+        $url = "$base/props";
         $method = 'GET';
     }
     elsif ($backend eq 'ollama') {
         # Ollama /api/show is POST with { name }
         # Example: http://127.0.0.1:11434/api/show
-        $url = "$host/api/show";
+        $url = "$base/api/show";
         $method = 'POST';
         $body = encode_json({ name => $model // '' });
     }
@@ -326,15 +328,15 @@ sub get_model_info {
         # Example host: https://api.openai.com
         if (defined $model && length $model) {
             my $m = uri_escape($model);
-            $url = "$host/v1/models/$m";
+            $url = "$base/models/$m";
         } else {
-            $url = "$host/v1/models";   # falls back to listing, you can pick one later
+            $url = "$base/models";
         }
         $method = 'GET';
     }
     else {
         $backend //= "Undefined";
-        swarnl(0, "Unknown backend '$backend'. Use 'llama.cpp', 'ollama', 'openai', or leave unset.");
+        swarnl(0, "Unknown backend '$backend'. Use 'llama.cpp', 'ollama', or 'openai'.");
         return undef;
     }
 
@@ -539,6 +541,7 @@ sub estimate_message_tokens {
 
 sub get_model_name {
     my ($self) = @_;
+    return $self->{model} if defined $self->{model} && length $self->{model};
 
     my $props = $self->get_model_info();
     return '' unless $props;
@@ -549,7 +552,7 @@ sub get_model_name {
 sub get_model_key {
     my ($self) = @_;
     my $backend = $self->{backend} // $self->_detect_backend();
-    my $base    = _normalize_base_with_v1($self->{api_base} // '');
+    my $base    = _normalize_base_with_v1($self->{api_base} // $self->{host_url} // '');
     my $model   = $self->get_model_name() || 'unknown';
     return join(':', $backend, $base, $model);
 }
@@ -558,7 +561,7 @@ sub _detect_backend {
     my ($self) = @_;
     # If api_base looks like an HTTP(S) URL, prefer openai-style backend detection,
     # even if llama env vars exist.
-    my $base = $self->{api_base} // '';
+    my $base = $self->{api_base} // $self->{host_url} // '';
     return 'openai' if $base =~ m{^https?://}i;
     return $self->{backend} // 'llama.cpp';
 }
@@ -630,7 +633,6 @@ sub _normalize_base_with_v1 {
 
 sub _resolve_backend {
     my ($opt_val) = @_;
-    $DB::single=1;
     my $backend = _first_defined(
     	$opt_val,
     	$ENV{ZCHAT_BACKEND},

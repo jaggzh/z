@@ -76,8 +76,11 @@ sub help_sec($str) { "\033[44;33;1m $str $rst" }
 my ($opt, $usage) = describe_options(
     'z %o [prompt]',
     [ 'help|h',             "This beautiful help" ],
+    [ 'long-help|hh',       "Help with ${bmag}Examples$rst and other good stuff",
+                                { implies=>'help' } ],
     [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
     [ 'verbose-resp|vr+',   "Verbose response data" ],
+    [ 'quiet|q',            "Quiet unimportant warnings (right now the warning of no-query)" ],
     [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt) (This is old and needs updating)" ],
     [ 'clipboard|cb',       "Use clipboard content as Query" ],
     [ 'interactive|int|i',  "Interactive mode (query on CLI can be included as first message)" ],
@@ -90,9 +93,10 @@ my ($opt, $usage) = describe_options(
     [ 'ctx-info',           "Get running model context - Detailed" ],
     [ 'metadata',           "Get running model metadata" ],
     [ 'backend=s',          "Use with --max-ctx and possibly other URL/API selection features" ],
+    [ 'model=s',            "Model id/name to use for requests and keying persistent settings" ],
     [ 'stats-usage',        "Print usage stats to stderr after each request" ],
     [ 'stats-usage-fmt=s',  "Format for --stats-usage (pretty|json)", { default => 'pretty' } ],
-    [ 'max-ctx|ctx-hard|chard||cmax=i', "Set persistent hard max context for this model (global, non-overridable)" ],
+    [ 'max-ctx|ctx-hard|chard|cmax=i', "Set persistent hard max context for this model (global, non-overridable)" ],
     [ 'n_predict|P=i',      "Limit prediction length to N tokens", { default => $def_npredict } ],
     [ 'play-user|pu',       "Play user text with TTS" ],
     [ 'play-resp|pr',       "Play response text with TTS" ],
@@ -199,55 +203,57 @@ if ($opt->help) {
     my $pager = pager();
     print $pager ($usage->text);
     print $pager "\nBasic usage (Version: $VERSION):\n";
-    print $pager <<~'EOT';
-        $ z "My query" # LLM output to stdout. History stored in 'default'
-          # (~/.config/zchat/sessions/default/history.json)
-        $ z -w  # Wiped history (ie. deleted ^ 'default' history file)
-        $ z -H "My query" # One-off query; no history read or written
-        $ z -n pets/rufus "what's a balanced diet..."
-          # (Created ~/.config/zchat/sessions/pets/spot/history.json)
-        $ z -n myprj/ui --system "Always answer in one-line" --sp
-          # Stored session name and a temporary system prompt in ^^ my shell.
-          # (But didn't perform a query.)
-          # --system, with type not specified, auto-detected the spaces
-          #      as a string. --system-file "My Assistant.txt" specifies.
+    if ($opt->long_help) {
+        print $pager <<~'EOT';
+            $ z "My query" # LLM output to stdout. History stored in 'default'
+              # (~/.config/zchat/sessions/default/history.json)
+            $ z -w  # Wiped history (ie. deleted ^ 'default' history file)
+            $ z -H "My query" # One-off query; no history read or written
+            $ z -n pets/rufus "what's a balanced diet..."
+              # (Created ~/.config/zchat/sessions/pets/spot/history.json)
+            $ z -n myprj/ui --system "Always answer in one-line" --sp
+              # Stored session name and a temporary system prompt in ^^ my shell.
+              # (But didn't perform a query.)
+              # --system, with type not specified, auto-detected the spaces
+              #      as a string. --system-file "My Assistant.txt" specifies.
 
-        Select or create 'myprj' session, store it active in the
-         current shell session group, and perform a query, which will
-         be stored in 'myprj' chat history.
-        $ z -n myprj --sp -- "What's a SID and Session Group Leader?"
-         # session *name* stored in /tmp/zchat-{uid}-{sid}.{sgpid}.yaml
-         # history in ~/.config/zchat/sessions/myprj/history.json
+            Select or create 'myprj' session, store it active in the
+             current shell session group, and perform a query, which will
+             be stored in 'myprj' chat history.
+            $ z -n myprj --sp -- "What's a SID and Session Group Leader?"
+             # session *name* stored in /tmp/zchat-{uid}-{sid}.{sgpid}.yaml
+             # history in ~/.config/zchat/sessions/myprj/history.json
 
-        Same, but subdirs can be used
-        $ z -n myprj2 -- "Hist stored in 'myprj2', but only for this call."
-          # (Created ~/.config/zchat/sessions/default/history.json)
+            Same, but subdirs can be used
+            $ z -n myprj2 -- "Hist stored in 'myprj2', but only for this call."
+              # (Created ~/.config/zchat/sessions/default/history.json)
 
-        Store 'default' as user global session (to be used when session
-         is not specified or not set with --sp in the current shell.
-        $ z -n default --su # Store 'default' as user global session
+            Store 'default' as user global session (to be used when session
+             is not specified or not set with --sp in the current shell.
+            $ z -n default --su # Store 'default' as user global session
 
-        $ z I can query unsafely too.
-        $ cat q.txt | z -
+            $ z I can query unsafely too.
+            $ cat q.txt | z -
 
-        System prompt name (from system files or through 'persona' bin)
-         Here I'm specifying cat-talk as my session, and storing (-ss)
-         its active system prompt name as 'my-cat'
-        $ z --system my-cat --ss -n cat-talk -- "I stored my-cat in my 'session')
+            System prompt name (from system files or through 'persona' bin)
+             Here I'm specifying cat-talk as my session, and storing (-ss)
+             its active system prompt name as 'my-cat'
+            $ z --system my-cat --ss -n cat-talk -- "I stored my-cat in my 'session')
 
-        Provide a path to the system prompt, and store it default in
-         the 'cat-talk' session.
-        $ z --system-file here/sys.txt --ss -n cat-talk -- "And a query."
+            Provide a path to the system prompt, and store it default in
+             the 'cat-talk' session.
+            $ z --system-file here/sys.txt --ss -n cat-talk -- "And a query."
 
-        Environment examined in this priority:
-          URL:
-          LLAMA_URL     LLAMA_API_URL    LLAMACPP_SERVER  LLAMA_CPP_SERVER
-           LLM_API_URL  OPENAI_BASE_URL  OPENAI_API_BASE  OPENAI_URL
+            Environment examined in this priority:
+              URL:
+              LLAMA_URL     LLAMA_API_URL    LLAMACPP_SERVER  LLAMA_CPP_SERVER
+               LLM_API_URL  OPENAI_BASE_URL  OPENAI_API_BASE  OPENAI_URL
 
-          API Key:
-          LLAMA_API_KEY  OPENAI_API_KEY  AZURE_OPENAI_API_KEY
+              API Key:
+              LLAMA_API_KEY  OPENAI_API_KEY  AZURE_OPENAI_API_KEY
 
-        EOT
+            EOT
+    }
     pagerdone($pager);
     exit;
 }
@@ -476,6 +482,7 @@ my $zchat = ZChat->new(
     stats_usage => $opt->stats_usage,
     stats_usage_fmt => ($opt->stats_usage_fmt // 'pretty'),
     backend => $opt->backend,
+    model   => $opt->model,
 );
 
 if ($opt->max_ctx) {
@@ -1000,7 +1007,9 @@ if (!$intmode && !defined $uprompt && !$has_tool_results) {
         }
         exit; # They performed some actions deliberately. Exit silently.
     } else {
-        swarn "No query or tool-results provided. See -h or use -i for interactive mode";
+        if (!$opt->quiet) {
+            swarn "No query or tool-results provided. See -h; -i for interactive mode; -q to quiet.";
+        }
         exit;
     }
 }

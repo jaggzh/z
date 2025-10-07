@@ -41,6 +41,7 @@ sub new {
         pin_shims    => $opts{pin_shims},
         override_pproc=> $opts{override_pproc},
         backend      => $opts{backend},
+        model        => $opts{model},
         config       => undef,
         core         => undef,
         storage      => undef,
@@ -82,9 +83,9 @@ sub new {
         config => $self->{config}
     );
 
-    $DB::single=1;
     $self->{core} = ZChat::Core->new(
 		backend => $self->{backend},
+        model   => $self->{model},
 	);
 
     return $self;

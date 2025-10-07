@@ -104,6 +104,7 @@ sub get_model_context_size {
     }
     
     # Fetch fresh
+    $DB::single=1;
     my $n_ctx = $self->{core}->get_n_ctx();
     
     # Cache it

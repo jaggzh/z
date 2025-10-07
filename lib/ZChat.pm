@@ -756,7 +756,7 @@ sub query($self, $user_text, $optshro=undef) {
         for my $tool_result (@{$optshro->{tool_results}}) {
             my $meta = { tool_name => $tool_result->{name} };
             $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
-            
+
             push @context, {
                 role => 'tool',
                 content => $tool_result->{data},
@@ -766,10 +766,10 @@ sub query($self, $user_text, $optshro=undef) {
             };
         }
     }
-    
+
     # Build message array - handle tool-only vs user query cases
     my @messages = (@$pins_msgs, @context);
-    
+
     # Add user message only if we have user text
     if (defined $user_text && $user_text ne '') {
         push @messages, { role => 'user', content => $user_text };
@@ -850,17 +850,17 @@ sub query($self, $user_text, $optshro=undef) {
             request_time => $response_metadata->{request_time} || time,
         });
     }
-    
+
     # Store tool results in history if provided
     if ($optshro->{tool_results}) {
         for my $tool_result (@{$optshro->{tool_results}}) {
             my $meta = { tool_name => $tool_result->{name} };
             $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
-            
+
             $self->{history}->append('tool', $tool_result->{data}, $meta);
         }
     }
-    
+
     $self->{history}->append('assistant', $response_text, $response_metadata);
     $self->{history}->save();
 
@@ -870,6 +870,11 @@ sub query($self, $user_text, $optshro=undef) {
             $total_input_text,
             $response_metadata->{tokens_input}
         );
+    }
+
+    # Update cached model name from response
+    if ($response_metadata->{model}) {
+        $self->{context_mgr}->update_model_from_response($response_metadata);
     }
 
 	if ($self->{stats_usage}) {
@@ -986,7 +991,7 @@ sub show_status($self, $verbose_level, $optshro={}) {
     say "${a_stat_actline}* Precedence:$rst";
 
     # System prompt precedence
-    $self->_show_precedence_section("System prompt", 
+    $self->_show_precedence_section("System prompt",
         $status_info->{precedence}{system_prompt}, $verbose_level, $def_abbr_sysstr);
 
     # Session precedence
@@ -1036,7 +1041,7 @@ sub _show_precedence_section {
     my $indent = "   ";
 
     for my $item (@$precedence_items) {
-        my $active_marker = $item->{active} ? 
+        my $active_marker = $item->{active} ?
             "${a_stat_acttag}[active]$rst" : "${a_stat_undeftag}[unused]$rst";
         my $value = $item->{value} // 'undef';
 
@@ -1154,9 +1159,9 @@ sub del_shell_config {
 
 sub wipe_session_history {
     my ($session_name) = @_;
-    
+
     return 0 unless $session_name;
-    
+
     # Create minimal storage object just for this operation
     my $storage = ZChat::Storage->new();
     return $storage->wipe_history($session_name);

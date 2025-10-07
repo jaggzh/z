@@ -503,10 +503,10 @@ sub estimate_message_tokens {
 }
 
 sub get_model_name {
-    my ($self) = @_;
+    my ($self, $force_refresh) = @_;
     return $self->{model} if defined $self->{model} && length $self->{model};
 
-    my $props = $self->get_model_info();
+    my $props = $self->get_model_info($force_refresh);
     return '' unless $props;
 
     return $self->_extract_model_name($props);

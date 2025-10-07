@@ -8,6 +8,14 @@ use File::Spec;
 use YAML::XS qw(LoadFile DumpFile);
 
 use ZChat::Utils ':all';
+use ZChat::Defaults qw(
+    CACHE_MODEL_INFO_TTL
+    CACHE_MIN_UPDATE_INTERVAL
+    DEFAULT_N_CTX
+    CONTEXT_SAFETY_MARGIN
+    MIN_HISTORY_MESSAGES
+    DEFAULT_CHARS_PER_TOKEN
+);
 
 sub new {
     my ($class, %opts) = @_;
@@ -23,11 +31,12 @@ sub new {
         core => ($opts{core} // die "core required"),
         cache_file => File::Spec->catfile($config_dir, 'model_cache.yaml'),
         models_file => File::Spec->catfile($config_dir, 'models.yaml'),
-        char_token_ratio => 3.5,  # Default estimate: 3.5 chars per token
-        safety_margin => 0.85,    # Use 85% of context to leave room for response
-        min_history_messages => 4, # Keep at least last 2 exchanges
+        char_token_ratio => DEFAULT_CHARS_PER_TOKEN,
+        safety_margin => CONTEXT_SAFETY_MARGIN,
+        min_history_messages => MIN_HISTORY_MESSAGES,
         cache => {},              # Initialize empty cache
         models => {},             # Persistent per-model settings (non-expiring)
+        cache_dirty => 0,         # Track if cache needs writing
     };
     
     bless $self, $class;
@@ -52,9 +61,25 @@ sub _load_cache {
 }
 
 sub _save_cache {
-    my ($self) = @_;
+    my ($self, $force) = @_;
+    
+    return unless $self->{cache_dirty} || $force;
+    
+    # Check if enough time has passed since last write (throttle writes)
+    my $last_write = $self->{cache}{_last_write_time} // 0;
+    my $now = time;
+    
+    unless ($force || ($now - $last_write) >= CACHE_MIN_UPDATE_INTERVAL) {
+        sel(3, "Throttling cache write (last write " . ($now - $last_write) . "s ago)");
+        return;
+    }
+    
+    $self->{cache}{_last_write_time} = $now;
+    
     eval {
         DumpFile($self->{cache_file}, $self->{cache});
+        $self->{cache_dirty} = 0;
+        sel(3, "Wrote cache to disk");
     };
     warn "Failed to save cache: $@\n" if $@;
 }
@@ -79,13 +104,90 @@ sub _save_models {
     warn "Failed to save models: $@\n" if $@;
 }
 
+sub _get_cached_model_name {
+    my ($self) = @_;
+    
+    my $api_url = $self->{core}{api_url} // '';
+    my $backend = $self->{core}{backend} // 'llama.cpp';
+    
+    my $last_known = $self->{cache}{last_known_model};
+    return undef unless $last_known;
+    
+    # Verify it matches our current connection
+    if (($last_known->{api_url} // '') eq $api_url &&
+        ($last_known->{backend} // '') eq $backend) {
+        
+        my $age = time - ($last_known->{timestamp} || 0);
+        if ($age < CACHE_MODEL_INFO_TTL) {
+            sel(2, "Using cached model name: $$last_known{name} (age: ${age}s)");
+            return $last_known->{name};
+        } else {
+            sel(2, "Cached model name expired (age: ${age}s)");
+        }
+    }
+    
+    return undef;
+}
+
+sub _update_cached_model_name {
+    my ($self, $model_name) = @_;
+    
+    my $api_url = $self->{core}{api_url} // '';
+    my $backend = $self->{core}{backend} // 'llama.cpp';
+    
+    my $last_known = $self->{cache}{last_known_model} // {};
+    
+    # Only update if name changed or doesn't exist
+    if (!$last_known->{name} || $last_known->{name} ne $model_name) {
+        sel(2, "Updating cached model name: $model_name");
+        $self->{cache}{last_known_model} = {
+            name => $model_name,
+            timestamp => time,
+            api_url => $api_url,
+            backend => $backend,
+        };
+        $self->{cache_dirty} = 1;
+        
+        # If model changed, invalidate old ctx cache
+        if ($last_known->{name} && $last_known->{name} ne $model_name) {
+            my $old_key = "ctx_$$last_known{name}";
+            delete $self->{cache}{$old_key};
+            sel(2, "Invalidated ctx cache for old model: $$last_known{name}");
+        }
+    }
+}
+
 sub get_model_context_size {
     my ($self, $force_refresh) = @_;
     
-    my $model_name = $self->{core}->get_model_name();
+    my $model_name;
+    my $model_key;
+    
+    # Try to get model name from cache first (fast path - no server hit)
+    unless ($force_refresh) {
+        $model_name = $self->_get_cached_model_name();
+        if ($model_name) {
+            $model_key = join(':', 
+                $self->{core}{backend} // 'llama.cpp',
+                $self->{core}{api_url} // '',
+                $model_name
+            );
+        }
+    }
+    
+    # Need to hit server to get model name
+    unless ($model_name) {
+        sel(2, "Fetching model name from server");
+        $model_name = $self->{core}->get_model_name($force_refresh);
+        $model_key = eval { $self->{core}->get_model_key() } // $model_name;
+        
+        # Cache the model name for next time
+        $self->_update_cached_model_name($model_name);
+    }
+    
     my $cache_key = "ctx_$model_name";
-    my $model_key = eval { $self->{core}->get_model_key() } // $model_name;
 
+    # Check for forced max_ctx
     if (my $forced = $self->{models}{$model_key}{max_ctx}) {
         sel(2, "Using forced max_ctx for model $model_key: $forced");
         $self->{cache}{$cache_key} = {
@@ -93,19 +195,23 @@ sub get_model_context_size {
             timestamp => time,
             model => $model_name,
         };
+        $self->{cache_dirty} = 1;
         $self->_save_cache();
         return $forced;
     }
     
     # Check cache first (valid for 24 hours) unless force_refresh
     if (!$force_refresh && (my $cached = $self->{cache}{$cache_key})) {
-        if (time - $cached->{timestamp} < 86400) {
-            sel(2, "Using cached n_ctx for $model_name: $cached->{n_ctx}");
+        my $age = time - $cached->{timestamp};
+        if ($age < CACHE_MODEL_INFO_TTL) {
+            sel(2, "Using cached n_ctx for $model_name: $$cached{n_ctx} (age: ${age}s)");
             return $cached->{n_ctx};
+        } else {
+            sel(2, "Cached n_ctx expired (age: ${age}s)");
         }
     }
     
-    # Fetch fresh
+    # Fetch fresh - but model_info may already be loaded if we got model_name above
     sel(2, "Fetching fresh n_ctx from server for $model_name");
     my $n_ctx = $self->{core}->get_n_ctx($force_refresh);
     
@@ -115,18 +221,10 @@ sub get_model_context_size {
         timestamp => time,
         model => $model_name,
     };
+    $self->{cache_dirty} = 1;
     $self->_save_cache();
     
     return $n_ctx;
-}
-
-sub set_persistent_max_ctx {
-    my ($self, $model_key, $n) = @_;
-    $self->{models}{$model_key} = {
-        max_ctx => int($n),
-        set_at  => time,
-    };
-    $self->_save_models();
 }
 
 sub estimate_tokens {
@@ -161,7 +259,20 @@ sub update_ratio_from_actual {
         timestamp => time,
     };
     
+    $self->{cache_dirty} = 1;
+    
+    # Throttled save - only every 10 samples
     $self->_save_cache() if ($self->{cache}{$ratio_key}{samples} % 10) == 0;
+}
+
+sub update_model_from_response {
+    my ($self, $response_metadata) = @_;
+    
+    return unless $response_metadata && $response_metadata->{model};
+    
+    my $model_name = $response_metadata->{model};
+    $self->_update_cached_model_name($model_name);
+    $self->_save_cache();  # Save immediately on model name updates
 }
 
 sub fit_messages_to_context {
@@ -219,6 +330,21 @@ sub fit_messages_to_context {
     }
     
     return \@fitted_messages;
+}
+
+sub set_persistent_max_ctx {
+    my ($self, $model_key, $n) = @_;
+    $self->{models}{$model_key} = {
+        max_ctx => int($n),
+        set_at  => time,
+    };
+    $self->_save_models();
+}
+
+# Destructor to ensure cache is written on exit
+sub DESTROY {
+    my ($self) = @_;
+    $self->_save_cache(1) if $self->{cache_dirty};  # Force write on exit
 }
 
 1;

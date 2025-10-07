@@ -80,13 +80,14 @@ sub _save_models {
 }
 
 sub get_model_context_size {
-    my ($self) = @_;
+    my ($self, $force_refresh) = @_;
     
     my $model_name = $self->{core}->get_model_name();
     my $cache_key = "ctx_$model_name";
     my $model_key = eval { $self->{core}->get_model_key() } // $model_name;
 
     if (my $forced = $self->{models}{$model_key}{max_ctx}) {
+        sel(2, "Using forced max_ctx for model $model_key: $forced");
         $self->{cache}{$cache_key} = {
             n_ctx => $forced,
             timestamp => time,
@@ -96,16 +97,17 @@ sub get_model_context_size {
         return $forced;
     }
     
-    # Check cache first (valid for 24 hours)
-    if (my $cached = $self->{cache}{$cache_key}) {
+    # Check cache first (valid for 24 hours) unless force_refresh
+    if (!$force_refresh && (my $cached = $self->{cache}{$cache_key})) {
         if (time - $cached->{timestamp} < 86400) {
+            sel(2, "Using cached n_ctx for $model_name: $cached->{n_ctx}");
             return $cached->{n_ctx};
         }
     }
     
     # Fetch fresh
-    $DB::single=1;
-    my $n_ctx = $self->{core}->get_n_ctx();
+    sel(2, "Fetching fresh n_ctx from server for $model_name");
+    my $n_ctx = $self->{core}->get_n_ctx($force_refresh);
     
     # Cache it
     $self->{cache}{$cache_key} = {

@@ -86,6 +86,7 @@ sub new {
     $self->{core} = ZChat::Core->new(
 		backend => $self->{backend},
         model   => $self->{model},
+        api_url => $opts{api_url},
 	);
 
     return $self;

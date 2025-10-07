@@ -20,20 +20,20 @@ sub new {
     my ($class, %opts) = @_;
 
     my $self = {
-        api_base => _resolve_api_base($opts{api_base}),
+        api_url  => _resolve_api_url($opts{api_url}),
         api_key  => _first_defined($opts{api_key}, _resolve_api_key()),
         fallback_api_key => $opts{fallback_api_key} // 'na',
         backend  => _resolve_backend($opts{backend}),
         model  => $opts{model},
         model_info => undef,
         model_info_loaded => 0,
-        host_url => '', # Derived from api_base without URI
+        host_url => '', # Derived from api_url without URI
     };
-    my ($tmp_url) = ($self->{api_base} =~ m#^(.+?//.+?)(?:/|$)#);
+    my ($tmp_url) = ($self->{api_url} =~ m#^(.+?//.+?)(?:/|$)#);
     if (!defined $tmp_url) {
-    	swarn 0, <<~"EOT";
+    	swarnl 0, <<~"EOT";
 			Couldn't derive plain base URL (with URI stripped) from
-			  api_base: $$self{api_base}.
+			  api_url: $$self{api_url}.
 			Potential misconfiguration in provided API URL.
 			If your api base functions, somehow, okay, but we won't be able to build
 			tokenization and n_ctx requests.
@@ -43,6 +43,10 @@ sub new {
 	}
 
     bless $self, $class;
+    
+    sel(2, "Backend detected/configured: " . ($self->{backend} // 'auto-detect'));
+    sel(2, "API URL: " . ($self->{api_url} // 'none'));
+    
     return $self;
 }
 
@@ -63,6 +67,7 @@ sub _build_headers {
     
     return \%headers;
 }
+
 sub complete_request($self, $messages, $optshro=undef) {
     $optshro ||= {};
 
@@ -127,7 +132,7 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
     my $headers = $self->_build_headers();
 
     my $tx = $ua->build_tx(
-        POST => "$$self{api_base}/chat/completions",
+        POST => $self->_build_url("/chat/completions"),
         $headers,
         json => $data
     );
@@ -242,7 +247,7 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
     my $headers = $self->_build_headers();
 
     my $tx = $ua->post(
-        "$$self{api_base}/chat/completions",
+        $self->_build_url("/chat/completions"),
         $headers,
         json => $data
     );
@@ -295,42 +300,36 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
 }
 
 sub get_model_info {
-    my ($self) = @_;
+    my ($self, $force_refresh) = @_;
 
-    return $self->{model_info} if $self->{model_info_loaded};
+    return $self->{model_info} if $self->{model_info_loaded} && !$force_refresh;
 
     # Backend disabled explicitly
     return undef if exists $self->{backend} && defined $self->{backend} && $self->{backend} eq '';
 
     my $backend = $self->{backend};
-    my $host_in = $self->{api_base} // $self->{host_url} // '';
-    my $base    = _normalize_base_with_v1($host_in);
-    my $model   = $self->{model};          # expected model id/name (if provided)
-    my ($method, $url, $body) = ('GET', undef, undef);
+    my $model   = $self->{model};
+    my ($method, $path, $body) = ('GET', undef, undef);
 
     # Decide endpoint + method per backend
     if (!defined $backend || $backend eq 'llama.cpp') {
-        # llama.cpp server exposes /props (GET)
-        # Example: http://localhost:8080/props
-        $url = "$base/props";
+        # llama.cpp server exposes /props (GET) - no /v1 prefix
+        $path = '/props';
         $method = 'GET';
     }
     elsif ($backend eq 'ollama') {
         # Ollama /api/show is POST with { name }
-        # Example: http://127.0.0.1:11434/api/show
-        $url = "$base/api/show";
+        $path = '/api/show';
         $method = 'POST';
         $body = encode_json({ name => $model // '' });
     }
     elsif ($backend eq 'openai') {
-        # OpenAI: use Models API
-        # Prefer model-specific retrieve if a model id is configured
-        # Example host: https://api.openai.com
+        # OpenAI: use Models API with /v1 prefix
         if (defined $model && length $model) {
             my $m = uri_escape($model);
-            $url = "$base/models/$m";
+            $path = "/v1/models/$m";
         } else {
-            $url = "$base/models";
+            $path = '/v1/models';
         }
         $method = 'GET';
     }
@@ -340,7 +339,8 @@ sub get_model_info {
         return undef;
     }
 
-    sel 1, "get_model_info() hitting $url";
+    my $url = $self->_build_url($path);
+    sel 2, "get_model_info() hitting $url";
     my $ua = LWP::UserAgent->new(timeout => 10);
 
     # Build request and headers
@@ -408,55 +408,18 @@ sub _build_headers_for {
     return \%h;
 }
 
-sub get_model_info_old_rm {
-    my ($self) = @_;
-	# Undefined backend will try llama.cpp then ollama
-	# "" disables the hits entirely
-
-    return $self->{model_info} if $self->{model_info_loaded};
-
-	# Backend was disabled by caller (ie. set to '')
-	return undef if exists $self->{backend} && defined $self->{backend} && $self->{backend} eq '';
-
-    my $backend = $self->{backend};
-    my $url;
-
-	# If it's undefined we try each...
-    if (!defined $backend || $backend eq 'llama.cpp') {
-        $url = "$$self{host_url}/props";
-    } elsif ($backend eq 'ollama') {
-        $url = "$$self{host_url}/api/show";
-    } elsif ($backend eq 'openai') {
-        $url = "$$self{host_url}/api/show";
-    } else {
-    	$backend //= "Undefined"; 
-        swarnl(0, "Unknown backend '$backend'. Use 'llama.cpp', 'ollama', or leave unset.");
-        return undef;
-    }
-
-	sel 1, "get_model_info() hitting $url";
-    my $ua = LWP::UserAgent->new(timeout => 5);
+# Build full URL with proper path handling per backend
+sub _build_url {
+    my ($self, $path) = @_;
+    my $base = $self->{api_url};
     
-    # Build request with proper headers
-    my $req = HTTP::Request->new('GET', $url);
-    my $headers = $self->_build_headers();
-    for my $header_name (keys %$headers) {
-        $req->header($header_name => $headers->{$header_name});
-    }
+    # Remove trailing slash from base if present
+    $base =~ s{/$}{};
     
-    my $response = $ua->request($req);
-    unless ($response->is_success) {
-        sel(2, "Model info fetch failed from $url: " . $response->status_line);
-        $self->{model_info_loaded} = 1;
-        $self->{model_info} = undef;
-        return undef;
-    }
-
-    my $data = decode_json($response->decoded_content);
-    $self->{model_info} = $data;
-    $self->{model_info_loaded} = 1;
-
-    return $data;
+    # Ensure path starts with /
+    $path = "/$path" unless $path =~ m{^/};
+    
+    return "$base$path";
 }
 
 sub _extract_model_name {
@@ -470,10 +433,10 @@ sub _extract_model_name {
 }
 
 sub get_n_ctx {
-    my ($self) = @_;
+    my ($self, $force_refresh) = @_;
 
     my $def_n_ctx = 1024;
-    my $props = $self->get_model_info();
+    my $props = $self->get_model_info($force_refresh);
     return $def_n_ctx unless $props;
 
     if (($self->{backend}//'') eq 'ollama') { # '' to prevent error
@@ -490,7 +453,7 @@ sub tokenize {
     my $with_pieces = $opts->{with_pieces} || 0;
 
     my $ua = LWP::UserAgent->new(timeout => 5);
-    my $url = "$$self{host_url}/tokenize";
+    my $url = $self->_build_url('/tokenize');
 
     my $request_data = { content => $text };
     $request_data->{with_pieces} = JSON::XS::true if $with_pieces;
@@ -552,16 +515,16 @@ sub get_model_name {
 sub get_model_key {
     my ($self) = @_;
     my $backend = $self->{backend} // $self->_detect_backend();
-    my $base    = _normalize_base_with_v1($self->{api_base} // $self->{host_url} // '');
+    my $base    = $self->{api_url} // '';
     my $model   = $self->get_model_name() || 'unknown';
     return join(':', $backend, $base, $model);
 }
 
 sub _detect_backend {
     my ($self) = @_;
-    # If api_base looks like an HTTP(S) URL, prefer openai-style backend detection,
+    # If api_url looks like an HTTP(S) URL, prefer openai-style backend detection,
     # even if llama env vars exist.
-    my $base = $self->{api_base} // $self->{host_url} // '';
+    my $base = $self->{api_url} // '';
     return 'openai' if $base =~ m{^https?://}i;
     return $self->{backend} // 'llama.cpp';
 }
@@ -586,7 +549,7 @@ sub health_check {
     my $ua = LWP::UserAgent->new(timeout => 2);
     
     # Build request with headers for consistency
-    my $req = HTTP::Request->new('GET', "$$self{api_base}/health");
+    my $req = HTTP::Request->new('GET', $self->_build_url('/health'));
     my $headers = $self->_build_headers();
     for my $header_name (keys %$headers) {
         $req->header($header_name => $headers->{$header_name});
@@ -609,27 +572,6 @@ sub _first_defined {
     }
     return undef;
 }
-
-# sub _normalize_base_with_v1 {
-#     my ($u) = @_;
-#     $u ||= 'http://127.0.0.1:8080';
-#     $u =~ s{\s+}{}g;
-#     $u = "http://$u" unless $u =~ m{^https?://}i;
-#     $u =~ s{/$}{};
-#     $u =~ s{/v1$}{};
-#     return "$u/v1";
-# }
-
-sub _normalize_base_with_v1 {
-    my ($raw) = @_;
-    return '' unless defined $raw && length $raw;
-    my $u = eval { URI->new($raw) } || return $raw;
-    my $origin = $u->scheme . '://' . $u->host;
-    $origin .= ':' . $u->port if defined $u->port && $u->port !~ /^(?:80|443)$/;
-    # Force a canonical trailing /v1
-    return $origin . '/v1';
-}
-
 
 sub _resolve_backend {
     my ($opt_val) = @_;
@@ -659,13 +601,23 @@ sub _get_openai_envval {
 	);
 }
 
-sub _resolve_api_base {
+sub _resolve_api_url {
     my ($opt_val) = @_;
     my $env_val = _first_defined(
     	_get_llama_envval(),
     	_get_openai_envval(),
     );
-    return _normalize_base_with_v1(_first_defined($opt_val, $env_val));
+    my $url = _first_defined($opt_val, $env_val);
+    
+    # Normalize: ensure http/https prefix, strip common API path suffixes
+    if (defined $url && length $url) {
+        $url = "http://$url" unless $url =~ m{^https?://}i;
+        $url =~ s{/v1$}{};      # Remove /v1 suffix if present
+        $url =~ s{/api$}{};     # Remove /api suffix if present  
+        $url =~ s{/$}{};        # Remove trailing slash
+    }
+    
+    return $url;
 }
 
 sub _resolve_api_key {
@@ -689,7 +641,7 @@ ZChat::Core - LLM API communication for ZChat
     use ZChat::Core;
 
     my $core = ZChat::Core->new(
-        api_base => 'http://localhost:8080'
+        api_url => 'http://localhost:8080'
     );
 
     # Complete with messages

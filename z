@@ -89,10 +89,12 @@ my ($opt, $usage) = describe_options(
     [ 'raw|r',              "Raw output (no processing)" ],
     [ 'tokens-full',        "Output tokens of input text" ],
     [ 'token-count|T',      "Count tokens in input text" ],
-    [ 'ctx',                "Get running model n_ctx" ],
-    [ 'ctx-info',           "Get running model context - Detailed" ],
-    [ 'metadata',           "Get running model metadata" ],
+    [ 'ctx',                "Get running model n_ctx (use --update to refresh cache)" ],
+    [ 'ctx-info',           "Get running model context - Detailed (use --update to refresh cache)" ],
+    [ 'metadata',           "Get running model metadata (use --update to refresh cache)" ],
+    [ 'update',             "Force update/refresh (use with --ctx, etc.)" ],
     [ 'backend=s',          "Use with --max-ctx and possibly other URL/API selection features" ],
+    [ 'apiurl=s',           "API URL (overrides environment)" ],
     [ 'model=s',            "Model id/name to use for requests and keying persistent settings" ],
     [ 'stats-usage',        "Print usage stats to stderr after each request" ],
     [ 'stats-usage-fmt=s',  "Format for --stats-usage (pretty|json)", { default => 'pretty' } ],
@@ -483,6 +485,7 @@ my $zchat = ZChat->new(
     stats_usage_fmt => ($opt->stats_usage_fmt // 'pretty'),
     backend => $opt->backend,
     model   => $opt->model,
+    api_url => $opt->apiurl,
 );
 
 if ($opt->max_ctx) {
@@ -662,13 +665,13 @@ if ($opt->token_count || $opt->tokens_full) {
 
 if ($opt->ctx) {
     my $ctx_mgr = ZChat::ContextManager->new(core => $zchat->{core});
-    my $n_ctx = $ctx_mgr->get_model_context_size();
+    my $n_ctx = $ctx_mgr->get_model_context_size($opt->update);
     say $n_ctx;
     $non_query_acts++;
 }
 
 if ($opt->metadata) {
-    my $model_info = $zchat->{core}->get_model_info();
+    my $model_info = $zchat->{core}->get_model_info($opt->update);
     for my $key (sort keys %$model_info) {
         say "$key -> $model_info->{$key}";
     }
@@ -677,7 +680,7 @@ if ($opt->metadata) {
 
 if ($opt->ctx_info) {
     my $ctx_mgr = ZChat::ContextManager->new(core => $zchat->{core});
-    my $n_ctx = $ctx_mgr->get_model_context_size();
+    my $n_ctx = $ctx_mgr->get_model_context_size($opt->update);
     my $model = $zchat->{core}->get_model_name();
     
     say "Model: $model";
@@ -687,7 +690,7 @@ if ($opt->ctx_info) {
     my $cache = $ctx_mgr->{cache}{"ratio_$model"};
     if ($cache) {
         say "Char/token ratio: " . sprintf("%.2f", $cache->{ratio});
-        say "Based on $cache->{samples} samples";
+        say "Based on $$cache{samples} samples";
     }
     exit;
 }

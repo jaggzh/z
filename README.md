@@ -65,6 +65,7 @@ $ z --system my-sys-prompt.txt --ss   # Stored this file path as my session's sy
 $ z --system temporary-sys-prompt.txt --sp  # This is only tied to my shell and everything running in it.
 $ z --system my-main-user-prompt.txt --su # Stored global for my user.
 $ z --pin "Pinned content. Remember this in this session."
+```
 
 # And so much more.
 
@@ -312,14 +313,14 @@ This creates intuitive behavior where:
 
 **Separate Concerns, Separate Files**: Rather than cramming everything into monolithic config files, ZChat uses targeted storage:
 
-```bash
+```
 ~/.config/zchat/
-├── user.yaml                    # Global user preferences
+├── user.yaml                # Global user preferences
 └── sessions/
-    └── project/analysis/        # Hierarchical session organization
-        ├── session.yaml         # Session-specific config
-        ├── pins.yaml           # Pinned messages (separate for easy removal)
-        └── history.json        # Conversation history
+    └── project/analysis/    # Hierarchical session organization
+        ├── session.yaml     # Session-specific config
+        ├── pins.yaml        # Pinned messages (separate for easy removal)
+        └── history.json     # Conversation history
 ```
 
 This approach prevents unnecessary file rewrites, and enables a robust, powerful precedence system that defaults to.. just working. (YAML is convenient when you want to examine or edit by hand.)
@@ -371,8 +372,8 @@ System prompts support Xslate templating with useful variables:
 For reasoning models, ZChat can automatically strip `<think>...</think>` sections unless explicitly requested; and this is customizable, so you can do compelled-reasoning in your non-reasoning models, and it can just be stripped with a regex.
 
 ```bash
-z --thought "Complex reasoning task"  # Keep reasoning visible
-z "Simple task"                       # Auto-remove reasoning sections
+$ z --thought "Complex reasoning task"  # Keep reasoning visible
+$ z "Simple task"                       # Auto-remove reasoning sections
 ```
 
 ### Multi-Modal Support
@@ -380,8 +381,8 @@ z "Simple task"                       # Auto-remove reasoning sections
 Images are seamlessly integrated with base64 encoding and proper API formatting. (I've not tested images since separating functionality into the module).
 
 ```bash
-z --img photo.jpg "What's in this image?"
-z --clipboard      # Automatically detects image vs text clipboard content
+$ z --img photo.jpg "What's in this image?"
+$ z --clipboard      # Automatically detects image vs text clipboard content
 ```
 
 ## Usage Examples
@@ -390,23 +391,23 @@ z --clipboard      # Automatically detects image vs text clipboard content
 
 ```bash
 # Simple query
-z "Write a Perl function to parse CSV"
-z "How about with CSV::XS?"
+$ z "Write a Perl function to parse CSV"
+$ z "How about with CSV::XS?"
 
 # With specific preset system prompt file
-z -s coding "Optimize this algorithm for performance"
+$ z -s coding "Optimize this algorithm for performance"
 ```
 
 ### Session Management
 
 ```bash
 # Create hierarchical sessions
-z -n project/backend/api "Design the user authentication system"
-z -n project/frontend "What UI framework should we use?"
+$ z -n project/backend/api "Design the user authentication system"
+$ z -n project/frontend "What UI framework should we use?"
 
 # Store current settings
-z -s coding -n myproject --store-session  # coding preset becomes default for myproject
-z -s helpful --store-user                 # helpful becomes user's global default
+$ z -s coding -n myproject --store-session  # coding preset becomes default for myproject
+$ z -s helpful --store-user                 # helpful becomes user's global default
 ```
 
 ### Pin Management
@@ -418,24 +419,24 @@ z -s helpful --store-user                 # helpful becomes user's global defaul
 
 ```bash
 # Add persistent context
-z --pin "You are an expert Perl developer with 20 years experience"
-z --pin "The project uses modern Perl practices: signatures, postderef"
-z --pin "Focus on performance and maintainability"
+$ z --pin "You are an expert Perl developer with 20 years experience"
+$ z --pin "The project uses modern Perl practices: signatures, postderef"
+$ z --pin "Focus on performance and maintainability"
 
 # Review pins
-z --pin-sum                    # One-line summaries
-z --pin-list                   # Full content
+$ z --pin-sum                    # One-line summaries
+$ z --pin-list                   # Full content
 
 # Manage pins  
-z --pin-rm 0                   # Remove first pin
-z --pin-write 1="Updated content"  # Replace pin content
-z --pin-clear                  # Start fresh
+$ z --pin-rm 0                   # Remove first pin
+$ z --pin-write 1="Updated content"  # Replace pin content
+$ z --pin-clear                  # Start fresh
 ```
 
 ### Interactive Mode
 
 ```bash
-z -i  # Enter interactive mode
+$ z -i  # Enter interactive mode
 >> Tell me about Perl's postderef feature
 [Response appears here]
 >> Can you show an example?
@@ -447,19 +448,19 @@ z -i  # Enter interactive mode
 
 ```bash
 # Token analysis
-z -T "How many tokens is this text?"
+$ z -T "How many tokens is this text?"
 man grep | z -T -
-z --tokens-full "Detailed tokenization breakdown"
+$ z --tokens-full "Detailed tokenization breakdown"
 
 # Model information  
-z --ctx        # Context window size
-z --metadata   # Full model metadata
+$ z --ctx        # Context window size
+$ z --metadata   # Full model metadata
 
 # History management
-z --wipe       # Clear conversation history
-z -E           # Edit history in $EDITOR
-z -H           # Disable history entirely
-z -I           # Read-only history mode
+$ z --wipe       # Clear conversation history
+$ z -E           # Edit history in $EDITOR
+$ z -H           # Disable history entirely
+$ z -I           # Read-only history mode
 ```
 
 ## Programmatic Interface
@@ -502,9 +503,9 @@ for my $data_file (@files) {
 ZChat is designed for **distribution without installation**. The `FindBin` approach means you can:
 
 ```bash
-git clone https://github.com/jaggzh/z zchat
-cd zchat
-./z "Hello world"  # Just works
+$ git clone https://github.com/jaggzh/z zchat
+$ cd zchat
+$ ./z "Hello world"  # Just works (maybe)
 ```
 
 Dependencies are standard CPAN modules that most Perl installations include.
@@ -512,16 +513,16 @@ Dependencies are standard CPAN modules that most Perl installations include.
 For missing modules:
 
 ```bash
-cpan install Mojo::UserAgent JSON::XS YAML::XS Text::Xslate Image::Magick
+$ cpan install Mojo::UserAgent JSON::XS YAML::XS Text::Xslate Image::Magick
 ```
 
 ### Configuration
 
 Create initial user config:
 ```bash
-z --list-sys                       # See available system prompts
-z -s helpful --store-user          # Set global default
-z -n work/project1 --store-session # Create work session
+$ z --list-sys                       # See available system prompts
+$ z -s helpful --store-user          # Set global default
+$ z -n work/project1 --store-session # Create work session
 ```
 
 ## Technical Implementation Details (For LLMs)
@@ -621,21 +622,21 @@ ZChat follows what Claude deems as Perl's "no news is good news philosophy" whil
 
 ```bash
 # Set up a code review session, stored persistently, and enabled for the current shell session:
-z -n reviews/backend --pin "You are a senior software engineer reviewing code" --sp
-z --pin "Focus on: security, performance, maintainability"
-z --pin "Provide specific suggestions with examples"
+$ z -n reviews/backend --pin "You are a senior software engineer reviewing code" --sp
+$ z --pin "Focus on: security, performance, maintainability"
+$ z --pin "Provide specific suggestions with examples"
 
 # Combining and Chaining:
-z -n reviews/backend --pin "The first pin" --pin "Another" --sp
+$ z -n reviews/backend --pin "The first pin" --pin "Another" --sp
 # I just set the session acive in my shell, and added two pins
-z --pin "Focus on: security, performance, maintainability"
-z --pin "Provide specific suggestions with examples"
+$ z --pin "Focus on: security, performance, maintainability"
+$ z --pin "Provide specific suggestions with examples"
 
 # Perform a query:
-z "Review this authentication middleware"
+$ z "Review this authentication middleware"
 
 # Or if you changed shells you can pick the session for a one-off:
-z -n reviews/backend "Review this authentication middleware"
+$ z -n reviews/backend "Review this authentication middleware"
 ```
 
 ### Multi-Modal Analysis Pipeline

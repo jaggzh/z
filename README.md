@@ -317,10 +317,13 @@ This creates intuitive behavior where:
 ~/.config/zchat/
 ├── user.yaml                # Global user preferences
 └── sessions/
-    └── project/analysis/    # Hierarchical session organization
-        ├── session.yaml     # Session-specific config
-        ├── pins.yaml        # Pinned messages (separate for easy removal)
-        └── history.json     # Conversation history
+    ├── project/analysis/    # Hierarchical session organization
+    │   ├── session.yaml     # Session-specific config
+    │   ├── pins.yaml        # Pinned messages (separate for easy removal)
+    │   └── history.json     # Conversation history
+    └── pets/fluffy/
+        ├── session.yaml
+        ├── ...
 ```
 
 This approach prevents unnecessary file rewrites, and enables a robust, powerful precedence system that defaults to.. just working. (YAML is convenient when you want to examine or edit by hand.)

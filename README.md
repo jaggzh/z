@@ -56,7 +56,7 @@ $ z -n new-chat -- "This has its own isolated history, and I'm saying this to my
 $ z -n new-chat --sp  # I just set 'new-chat' in my shell and all the programs I call here
 $ z -w  # Wipe the conversation
 $ z -w I just wiped my session. What do you think?
-$ z -H -- "No history read nor written, but at least my query is now a bit proper.
+$ z -H -- "No history read nor written, but at least my query is now safer."
 $ z -I -- "This is Input-Only history."
 $ cat some-stuff.txt | z -
 $ z --system-string "You are a helpful AI assistant." --ss  "I just stored that system prompt for my session."

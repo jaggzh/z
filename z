@@ -103,7 +103,7 @@ my ($opt, $usage) = describe_options(
     [ 'play-user|pu',       "Play user text with TTS" ],
     [ 'play-resp|pr',       "Play response text with TTS" ],
     [ 'probs',              "Return probabilities for top N tokens" ],
-    [ 'no-color|nc',        "Disable color in interactive mode" ],
+    [ 'no-color|nc|C',      "Disable color in interactive mode and --text dump output" ],
     [ 'grammar|g=s',        "Force a grammar (string)" ],
     [ 'thought|think',      "Do not remove reasoning sections" ],
     [ 'thought-re|tre=s',   "Specify a regex for stripping reasoning" ],
@@ -147,6 +147,8 @@ my ($opt, $usage) = describe_options(
     [ 'wipeold|wipeexp|we|wo=s',  "Wipe/expire msgs older than {FLOAT TIME}[smhdwMyY] (e.g. 1.5h)" ],
     [ 'no-history|H',       "Do not use history (no load, no store)" ],
     [ 'input-only|I',       "Use history BUT do not write to it" ],
+    [ 'dump-history|dump|dh', "Dump chat history (user, tool, assistant roles only)" ],
+    [ 'dump-text|text|dt',       "Dump chat history (like User:...)" ],
     [ 'edit-hist|eh|E',     "Edit history in $editor" ],
     [ 'owrite-last=s',      "Overwrite last history message for role (u|user|a|assistant) with current prompt" ],
     [ 'conv-last|cl=s',     "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
@@ -171,7 +173,7 @@ my ($opt, $usage) = describe_options(
     [ 'pins-sys-max=i',     "Max system pins", { default => $def_pin_max } ],
     [ 'pins-user-max=i',    "Max user pins", { default => $def_pin_max } ],
     [ 'pins-ast-max=i',     "Max assistant pins", { default => $def_pin_max } ],
-	[],
+    [],
     [ 'pin-sys=s@',         "Add system pin(s)" ],
     [ 'pin-user=s@',        "Add user pin(s)" ],
     [ 'pin-ast=s@',         "Add assistant pin(s) (shorthand: ast)" ],
@@ -181,17 +183,17 @@ my ($opt, $usage) = describe_options(
     [ 'pins-clear-ast',     "Clear assistant pins only" ],
     [ 'pins-clear-sys',     "Clear system pins only" ],
     [ 'pin-shim=s',         "Set shim appended to user/assistant pinned messages" ],
-	[ 'pin-tpl-user=s',     "Template for user pins when using vars/varsfirst mode" ],
-	[ 'pin-tpl-ast=s',      "Template for assistant pins when using vars/varsfirst mode" ],
-	[ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: vars)" ],
-	[ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: concat)" ],
-	[ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
-	[],
-	[ help_sec('Tools (new, experimental):') ],
+    [ 'pin-tpl-user=s',     "Template for user pins when using vars/varsfirst mode" ],
+    [ 'pin-tpl-ast=s',      "Template for assistant pins when using vars/varsfirst mode" ],
+    [ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: vars)" ],
+    [ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: concat)" ],
+    [ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
+    [],
+    [ help_sec('Tools (new, experimental):') ],
     [ 'tool-result=s@',     "Inject tool result: --tool-result 'name:data' or '[id]name:data'" ],
     [ 'append-tool-calls',  "Append structured tool calls to assistant content as TOOL_CALL lines" ],
-	[],
-	[ help_sec('Help:') ],
+    [],
+    [ help_sec('Help:') ],
     [ 'help-sys-pin-vars',  "Show quick example of template vars to use for system pins", ],
     [ 'help-pins',          "Show detailed help for pinning" ],
     [ 'help-cli',           "CLI use - Basic", ],
@@ -917,6 +919,44 @@ for my $json (@{ $opt->pin_ua_json // [] }) {
 }
 sel 1, "--pin-ua-json: Added $new_pin_track user/assistant pins." if $new_pin_track;
 $new_pin_track=0; # No more using it but reset for safety
+
+
+if ($opt->dump_history || $opt->dump_text) {
+    $zchat->history->load();
+    my @history = grep { $_->{role} =~ /^(user|assistant|tool)$/ } @{$zchat->history->messages()};
+    # Only role and content
+    if (!@history) {
+        sel 1, "No history found.";
+    } else {
+        if ($opt->dump_history) { # JSON output
+            @history = map {
+                {
+                    role => $_->{role},
+                    content => $_->{content}
+                }
+            } @history;
+            say json_pretty_from_data_min(\@history);
+        } else {                  # Text version
+            # Capitalize role
+            my %clrmap = (
+                "user" => a24bg(36,24,80) . $whi,
+                "assistant" => a24bg(70,20,70) . $yel,
+                "tool" => $gra,
+            );
+            @history = map {
+                ($opt->no_color ? '' : ($clrmap{$$_{role}} // '')) .
+                uc(substr($$_{role},0,1))
+                    . substr($$_{role},1)
+                    . ($opt->no_color ? '' : $rst)
+                    . ":"
+                    . "\n"
+                    . $$_{content} . "\n"
+            } @history;
+            print join "\n", @history;
+        }
+    }
+    $non_query_acts++;
+}
 
 # History management
 if ($opt->wipe) {

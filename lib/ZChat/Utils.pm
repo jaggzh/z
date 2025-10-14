@@ -44,13 +44,15 @@ our @EXPORT_OK = qw(
 	$a_stat_exists
 	$a_stat_undeftag
 	file_create_secure
+	json_pretty_from_str_min
+	json_pretty_from_data_min
 );
 our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
     glyphs => [qw(sok swarn serr sultraerr)],
 );
 
-our $json_compact = JSON::XS->new->ascii->canonical; # For our custom json formatting
+our $json_compact = JSON::XS->new->utf8->canonical; # For our custom json formatting
 our $verbose = $ENV{ZCHAT_VERBOSE} // 0;  # 0=quiet, 1,2,3...
 our $uc_ok = "✔";  # Unicode "Good/OK/Checkmark"
 our $uc_warn = "⚠";  # Unicode "Warning"

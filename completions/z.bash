@@ -155,6 +155,8 @@ __z_opts() {
 
 --tool-result
 --append-tool-calls
+--append-ast
+--no-complete
 
 --help-sys-pin-vars
 --help-pins

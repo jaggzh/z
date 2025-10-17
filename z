@@ -190,8 +190,11 @@ my ($opt, $usage) = describe_options(
     [ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
     [],
     [ help_sec('Tools (new, experimental):') ],
-    [ 'tool-result=s@',     "Inject tool result: --tool-result 'name:data' or '[id]name:data'" ],
+    [ 'tool-result=s@',     "Post tool result: --tool-result 'name:data' or '[id]name:data'" ],
     [ 'append-tool-calls',  "Append structured tool calls to assistant content as TOOL_CALL lines" ],
+    [ 'no-complete',        "Do not query LLM (used with history modification options)" ],
+    [ 'append-ast=s',       "Append assistant message to history (implies --no-complete)",
+                                { implies => 'no-complete' } ],
     [],
     [ help_sec('Help:') ],
     [ 'help-sys-pin-vars',  "Show quick example of template vars to use for system pins", ],
@@ -292,6 +295,11 @@ if ($opt->tool_result && scalar(@{$opt->tool_result})) {
         };
         
         sel 1, "Parsed tool result: [Tool name]: $cya$tool_name$rst" . (defined $tool_id ? " ([ID]: $cya$tool_id$rst)" : "");
+    }
+    
+    # Warn about potential role alternation issues if no assistant response provided
+    if (!$opt->append_ast && !$no_complete) {
+        swarnl 2, "Tool result appended without --append-ast; potential role alternation issue";
     }
 }
 my $has_tool_results = $tool_results && scalar(@$tool_results);
@@ -1043,7 +1051,7 @@ if ($opt->print_session_dir) { $zchat->show_status(0, { session_dir=>1 } ); exit
 
 # Validate we have input for completion
 my $intmode = $opt->interactive;
-if (!$intmode && !defined $uprompt && !$has_tool_results) {
+if (!$intmode && !defined $uprompt && !$has_tool_results && !$opt->append_ast) {
     if ($non_query_acts++) {
         if (!-t && !$opt_dash) {
             swarn "z: Input not from terminal but '-' not specified. ($non_query_acts actions have been performed.)";
@@ -1066,27 +1074,60 @@ if (!$intmode || $opt->no_color) {
 if (defined $uprompt && length $uprompt) {
     tts_str($uprompt) if $opt->play_user;
 
-    my $query_opts = { stream => 1 };
-    $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
-    $query_opts->{tool_results} = $tool_results if $tool_results;
-    my $response = $zchat->query($uprompt, $query_opts);
+    unless ($no_complete) {
+        my $query_opts = { stream => 1 };
+        $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
+        $query_opts->{tool_results} = $tool_results if $tool_results;
+        my $response = $zchat->query($uprompt, $query_opts);
 
-    if ($opt->play_resp) {
-        eval { play_tts($response) };   # or whatever your fn is called
-        warn "Audio error: $@" if $@;
+        if ($opt->play_resp) {
+            eval { play_tts($response) };   # or whatever your fn is called
+            warn "Audio error: $@" if $@;
+        }
     }
 } elsif ($has_tool_results) {
-    my $query_opts = { stream => 1 };
-    $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
-    $query_opts->{tool_results} = $tool_results;
-    my $response = $zchat->query(undef, $query_opts);
+    unless ($no_complete) {
+        my $query_opts = { stream => 1 };
+        $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
+        $query_opts->{tool_results} = $tool_results;
+        my $response = $zchat->query(undef, $query_opts);
 
-    if ($opt->play_resp) {
-        eval { play_tts($response) };
-        warn "Audio error: $@" if $@;
+        if ($opt->play_resp) {
+            eval { play_tts($response) };
+            warn "Audio error: $@" if $@;
+        }
     }
 }
 
+# Handle history modifications without LLM completion
+if ($no_complete) {
+    $zchat->history->load();
+    
+    # Add user message if provided
+    if (defined $uprompt && $uprompt ne '') {
+        $zchat->history->append('user', $uprompt);
+        sel 1, "Added user message to history";
+    }
+    
+    # Add tool results if provided
+    if ($has_tool_results) {
+        for my $tool_result (@$tool_results) {
+            my $meta = { tool_name => $tool_result->{name} };
+            $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
+            
+            $zchat->history->append('tool', $tool_result->{data}, $meta);
+            sel 1, "Added tool result to history: $tool_result->{name}";
+        }
+    }
+    
+    # Add assistant message if provided
+    if ($opt->append_ast) {
+        $zchat->history->append('assistant', $opt->append_ast);
+        sel 1, "Added assistant message to history";
+    }
+    
+    $zchat->history->save();
+}
 
 exit if !$intmode;
 

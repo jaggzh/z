@@ -25,7 +25,7 @@ use constant {
     CACHE_MIN_UPDATE_INTERVAL => 28800,   # 8 hours (24/3) - throttle cache writes
     
     # Context management
-    DEFAULT_N_CTX => 1024,
+    DEFAULT_N_CTX => 22000,
     CONTEXT_SAFETY_MARGIN => 0.85,        # Use 85% of context
     MIN_HISTORY_MESSAGES => 4,            # Keep at least last 2 exchanges
     

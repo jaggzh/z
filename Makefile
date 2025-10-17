@@ -11,6 +11,7 @@ SRCFILES=\
 		lib/ZChat/History.pm \
 		lib/ZChat/SystemPrompt.pm \
 		lib/ZChat/ParentID.pm \
+		lib/ZChat/Defaults.pm \
 		lib/ZChat/ansi.pm \
 
 .PHONY: tags

@@ -15,6 +15,9 @@ use URI;
 use URI::Escape qw(uri_escape);
 
 use ZChat::Utils ':all';
+use ZChat::Defaults qw(
+    DEFAULT_N_CTX
+);
 
 sub new {
     my ($class, %opts) = @_;
@@ -435,7 +438,7 @@ sub _extract_model_name {
 sub get_n_ctx {
     my ($self, $force_refresh) = @_;
 
-    my $def_n_ctx = 1024;
+    my $def_n_ctx = DEFAULT_N_CTX;
     my $props = $self->get_model_info($force_refresh);
     return $def_n_ctx unless $props;
 

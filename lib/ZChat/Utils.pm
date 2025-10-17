@@ -163,33 +163,31 @@ sub json_pretty_from_str_min($str) {
 	}
     return json_pretty_from_data_min($data);
 }
+
 sub json_pretty_from_data_min($data) {
     my $json = $json_compact->encode($data);
-    # Simple pretty formatter with proper nesting
     my $indent = 0;
-    my $result = '';
+    my @result;
     my $in_string = 0;
-
     for my $char (split //, $json) {
-        if ($char eq '"' && ($result !~ /\\$/)) {
+        if ($char eq '"' && (@result && $result[-1] !~ /\\$/)) {
             $in_string = !$in_string;
         }
-
         if (!$in_string) {
             if ($char eq '{' || $char eq '[') {
-                $result .= $char . "\n" . ("  " x ++$indent);
+                push @result, $char, "\n", "  " x ++$indent;
             } elsif ($char eq '}' || $char eq ']') {
-                $result .= "\n" . ("  " x --$indent) . $char;
+                push @result, "\n", "  " x --$indent, $char;
             } elsif ($char eq ',') {
-                $result .= $char . "\n" . ("  " x $indent);
+                push @result, $char, "\n", "  " x $indent;
             } else {
-                $result .= $char;
+                push @result, $char;
             }
         } else {
-            $result .= $char;
+            push @result, $char;
         }
     }
-    return $result;
+    return join '', @result;
 }
 
 # # This version is non-tolerant of utf8 encoding errors

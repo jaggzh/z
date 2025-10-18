@@ -194,7 +194,7 @@ my ($opt, $usage) = describe_options(
     [ 'append-tool-calls',  "Append structured tool calls to assistant content as TOOL_CALL lines" ],
     [ 'no-complete',        "Do not query LLM (used with history modification options)" ],
     [ 'append-ast=s',       "Append assistant message to history (implies --no-complete)",
-                                { implies => 'no-complete' } ],
+                                { implies => 'no_complete' } ],
     [],
     [ help_sec('Help:') ],
     [ 'help-sys-pin-vars',  "Show quick example of template vars to use for system pins", ],
@@ -279,13 +279,18 @@ if ($opt->tool_result && scalar(@{$opt->tool_result})) {
         sel 3, "Parsing provided tool result: $cya$result_spec$rst";
         
         # Handle both formats: "name:data" and "id:name:data"
-        if ($result_spec =~ /^\[([^:\]]+)\]:([^:]+):(.+)$/s) {
+        if ($result_spec =~ /^\[([^:\]]+)\]:([^:]+):(.*)/s) {
             ($tool_id, $tool_name, $data) = ($1, $2, $3);
-        } elsif ($result_spec =~ /^([^:]+):(.+)$/s) {
+        } elsif ($result_spec =~ /^([^:]+):(.)$/s) {
             ($tool_name, $data) = ($1, $2);
             $tool_id = undef;
         } else {
-            die "${bred}ERROR: Invalid tool result format. Use: name:data or [id]name:data: $red$result_spec$rst\n";
+            serr "ERROR: Invalid tool result format. Use: name:data or id:name:data: ''$result_spec''\n";
+            exit 1;
+        }
+        if (length($data // '') == 0) {
+            serr "ERROR: Invalid tool result; data is blank. ''$result_spec''";
+            exit 1;
         }
         
         push @$tool_results, {
@@ -298,7 +303,7 @@ if ($opt->tool_result && scalar(@{$opt->tool_result})) {
     }
     
     # Warn about potential role alternation issues if no assistant response provided
-    if (!$opt->append_ast && !$no_complete) {
+    if (!$opt->append_ast && !$opt->no_complete) {
         swarnl 2, "Tool result appended without --append-ast; potential role alternation issue";
     }
 }
@@ -1074,7 +1079,7 @@ if (!$intmode || $opt->no_color) {
 if (defined $uprompt && length $uprompt) {
     tts_str($uprompt) if $opt->play_user;
 
-    unless ($no_complete) {
+    unless ($opt->no_complete) {
         my $query_opts = { stream => 1 };
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results if $tool_results;
@@ -1086,7 +1091,7 @@ if (defined $uprompt && length $uprompt) {
         }
     }
 } elsif ($has_tool_results) {
-    unless ($no_complete) {
+    unless ($opt->no_complete) {
         my $query_opts = { stream => 1 };
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results;
@@ -1100,7 +1105,7 @@ if (defined $uprompt && length $uprompt) {
 }
 
 # Handle history modifications without LLM completion
-if ($no_complete) {
+if ($opt->no_complete) {
     $zchat->history->load();
     
     # Add user message if provided

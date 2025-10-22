@@ -1,4 +1,5 @@
 #!/usr/bin/perl
+#!/usr/bin/perl -d
 # Re-run in debugger if...
 exec($^X, '-d', "$0", grep {!/^--debug$/} @ARGV) if grep {/^--debug$/} @ARGV;
 
@@ -278,14 +279,17 @@ if ($opt->tool_result && scalar(@{$opt->tool_result})) {
         my ($tool_id, $tool_name, $data);
         sel 3, "Parsing provided tool result: $cya$result_spec$rst";
         
-        # Handle both formats: "name:data" and "id:name:data"
+        # Handle both formats: "name:data" and "[id]name:data"
+        $DB::single=1;
         if ($result_spec =~ /^\[([^:\]]+)\]:([^:]+):(.*)/s) {
             ($tool_id, $tool_name, $data) = ($1, $2, $3);
         } elsif ($result_spec =~ /^([^:]+):(.)$/s) {
             ($tool_name, $data) = ($1, $2);
             $tool_id = undef;
         } else {
-            serr "ERROR: Invalid tool result format. Use: name:data or id:name:data: ''$result_spec''\n";
+            serr "ERROR: Invalid tool result format. Use: name:data or [id]name:data: ''$result_spec''\n";
+            serr "  Tool param, truncated 40c: {{",
+                substr($result_spec,0,40), "}}";
             exit 1;
         }
         if (length($data // '') == 0) {

@@ -278,7 +278,7 @@ if ($opt->tool_result && scalar(@{$opt->tool_result})) {
     for my $result_spec (@{$opt->tool_result}) {
         my ($tool_id, $tool_name, $data);
         sel 3, "Parsing provided tool result: $cya$result_spec$rst";
-        
+
         # Handle both formats: "name:data" and "[id]name:data"
         $DB::single=1;
         if ($result_spec =~ /^\[([^:\]]+)\]:([^:]+):(.*)/s) {
@@ -296,16 +296,16 @@ if ($opt->tool_result && scalar(@{$opt->tool_result})) {
             serr "ERROR: Invalid tool result; data is blank. ''$result_spec''";
             exit 1;
         }
-        
+
         push @$tool_results, {
             name => $tool_name,
             data => $data,
             id => $tool_id
         };
-        
+
         sel 1, "Parsed tool result: [Tool name]: $cya$tool_name$rst" . (defined $tool_id ? " ([ID]: $cya$tool_id$rst)" : "");
     }
-    
+
     # Warn about potential role alternation issues if no assistant response provided
     if (!$opt->append_ast && !$opt->no_complete) {
         swarnl 2, "Tool result appended without --append-ast; potential role alternation issue";
@@ -356,7 +356,7 @@ my $target_session;
 if ($opt->wipe || $opt->del_session) {
     # Need to resolve session before wiping anything that affects resolution
     $target_session = $opt->session // $ENV{ZCHAT_SESSION};
-    
+
     # If still undefined, check shell config before we potentially wipe it
     if (!defined $target_session && !$opt->del_pproc) {
         # Only check shell config if we're not about to wipe it
@@ -366,7 +366,7 @@ if ($opt->wipe || $opt->del_session) {
             $target_session = $shell_config->{session} if $shell_config;
         }
     }
-    
+
     # Fall back to user config, then default
     if (!defined $target_session) {
         my $user_file = ZChat::Config::get_user_config_path();
@@ -375,7 +375,7 @@ if ($opt->wipe || $opt->del_session) {
             $target_session = $user_config->{session} if $user_config;
         }
     }
-    
+
     $target_session //= 'default';
     sel(2, "Resolved target session for wipe operations: $target_session");
 }
@@ -451,7 +451,7 @@ my $use_images = 0;
 
 if ($opt->clipboard) {
     my $clip_data = Clipboard->paste;
-    
+
     if ($clip_data =~ /^\xFF\xD8/) {  # JPEG binary
         my $image_id = 'img';
         my $base64_image = encode_base64($clip_data);
@@ -486,7 +486,7 @@ if ($opt->image) {
         my $image_id = (@{$opt->image} == 1) ? 'img' : "img-" . ($index + 1);
         my $ora = a24fg(255,128,30);
         sel 1, "${ora}Attaching image ${whi}$image_id$ora, Base64 len: " . length($base64_image);
-        
+
         push @image_data, { id => $image_id, data => $base64_image };
     }
     $use_images = 1;
@@ -514,13 +514,13 @@ if ($opt->max_ctx) {
 # Apply configuration/storage changes early (before any blocking/editor work)
 if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     my %store_opts;
-    
+
     # System prompt options
     $store_opts{system_string}  = $opt->system_string     if defined $opt->system_string;
     $store_opts{system_file}    = $opt->system_file    if defined $opt->system_file;
     $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
     $store_opts{system}         = $opt->system         if defined $opt->system;
-    
+
     # Pin options
     $store_opts{pin_shims}      = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
     $store_opts{pin_tpl_user}   = $opt->pin_tpl_user   if defined $opt->pin_tpl_user;
@@ -528,7 +528,7 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     $store_opts{pin_mode_sys}   = $opt->pin_mode_sys   if defined $opt->pin_mode_sys;
     $store_opts{pin_mode_user}  = $opt->pin_mode_user  if defined $opt->pin_mode_user;
     $store_opts{pin_mode_ast}   = $opt->pin_mode_ast   if defined $opt->pin_mode_ast;
-    
+
     if ($opt->store_user) {
         # User config can store session name
         $store_opts{session} = $opt->session if defined $opt->session;
@@ -536,7 +536,7 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
         sel(1, "Stored user config: ", join(", ", map { "$_ => $store_opts{$_}" } sort keys %store_opts)) if %store_opts;
         $non_query_acts++;
     }
-    
+
     if ($opt->store_session) {
         # Session config never stores its own session name
         my %session_opts = %store_opts;
@@ -545,30 +545,30 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
         sel(1, "Stored session config: ", join(", ", sort keys %session_opts)) if %session_opts;
         $non_query_acts++;
     }
-    
+
     if ($opt->store_pproc) {
         # Shell config can store session name AND system prompt options
         my %shell_opts = ( session => ($opt->session // $zchat->get_session_name()) );
-        
+
         # Get resolved system prompt options from ZChat instead of using raw CLI options
         my $resolved_opts = $zchat->get_resolved_cli_options();
-        
+
         # Store resolved options (system gets converted to system_file or system_persona)
         $shell_opts{system_string}  = $resolved_opts->{system_string}  if defined $resolved_opts->{system_string};
         $shell_opts{system_file}    = $resolved_opts->{system_file}    if defined $resolved_opts->{system_file};
         $shell_opts{system_persona} = $resolved_opts->{system_persona} if defined $resolved_opts->{system_persona};
-        
+
         # Only store raw system if it wasn't resolved (shouldn't happen normally)
         $shell_opts{system} = $resolved_opts->{system} if defined $resolved_opts->{system};
-        
+
         $zchat->store_shell_config(\%shell_opts);
-        
+
         my @stored_items = ('session');
         push @stored_items, 'system_string'  if defined $resolved_opts->{system_string};
         push @stored_items, 'system_file'    if defined $resolved_opts->{system_file};
         push @stored_items, 'system_persona' if defined $resolved_opts->{system_persona};
         push @stored_items, 'system'         if defined $resolved_opts->{system};
-        
+
         sel 1, "Saved " . join(', ', @stored_items) . " for current shell (session: '$shell_opts{session}')";
         $non_query_acts++;
         # We still have wiping and other things that might need to be done. Don't exit
@@ -596,7 +596,7 @@ if ($opt->thought) {
 } elsif ($opt->thought_re) {
     $zchat->set_thought({mode => 'enabled', pattern => $opt->thought_re});
 } else {
-    # Default: auto-detect from system prompt  
+    # Default: auto-detect from system prompt
     $zchat->set_thought({mode => 'auto'});
 }
 
@@ -652,7 +652,7 @@ if ($opt->list_sys) {
 if ($opt->token_count || $opt->tokens_full) {
     my $input_text;
     if (defined $uprompt) {
-        $input_text = $uprompt; 
+        $input_text = $uprompt;
     } elsif ($has_tool_results) {
         $input_text = join("\n\n", $opt->tool_result);
         swarnl 1, "Counting tool call tokens may be inaccurate if we handle formatting.";
@@ -672,7 +672,7 @@ if ($opt->token_count || $opt->tokens_full) {
     if ($opt->tokens_full) {
         my $input_text = $uprompt // '';
         die "${bred}No input text provided$rst\n" if $input_text eq '';
-        
+
         my @tokens = $zchat->{core}->tokenize($input_text, { with_pieces => 1 });
         my $json = JSON::XS->new->utf8->canonical(1)->encode(\@tokens);
         say $json;
@@ -701,11 +701,11 @@ if ($opt->ctx_info) {
     my $ctx_mgr = ZChat::ContextManager->new(core => $zchat->{core});
     my $n_ctx = $ctx_mgr->get_model_context_size($opt->update);
     my $model = $zchat->{core}->get_model_name();
-    
+
     say "Model: $model";
     say "Context size: $n_ctx tokens";
     say "Usable (85%): " . int($n_ctx * 0.85) . " tokens";
-    
+
     my $cache = $ctx_mgr->{cache}{"ratio_$model"};
     if ($cache) {
         say "Char/token ratio: " . sprintf("%.2f", $cache->{ratio});
@@ -754,14 +754,14 @@ if ($opt->pins_clear) {
 
 if ($opt->pin_rm) {
     my @indices = @{$opt->pin_rm};
-    
+
     # Validate all indices first
     my ($valid, $error) = $zchat->validate_pin_indices(@indices);
     die "Pin removal validation failed: $error\n" unless $valid;
-    
+
     # Sort in reverse order to avoid index shifting
     @indices = sort { $b <=> $a } @indices;
-    
+
     my $removed = 0;
     for my $index (@indices) {
         if ($zchat->remove_pin($index)) {
@@ -801,12 +801,12 @@ if ($opt->pin_write) {
             die "Invalid --pin-write format '$write_spec'. Use: --pin-write 'INDEX=content'\n";
         }
     }
-    
+
     # Validate all indices exist
     my @indices = map { $_->{index} } @operations;
     my ($valid, $error) = $zchat->validate_pin_indices(@indices);
     die "Pin write validation failed: $error\n" unless $valid;
-    
+
     # Perform all updates
     my $updated = 0;
     for my $op (@operations) {
@@ -1004,10 +1004,10 @@ if (my $role_to_overwrite = $opt->owrite_last) {
     # Use cleaner API method
     $zchat->history->load();
     die "Cannot --owrite-last: conversation history is empty.\n" if $zchat->history->empty();
-    
+
     my $last = $zchat->history->get_last({role => $role_to_overwrite});
     die "Cannot --owrite-last: No '$role_to_overwrite' message found to overwrite.\n" unless $last;
-    
+
     $zchat->history_owrite_last($uprompt, { role => $role_to_overwrite });
     sel 1, "Successfully overwrote last '$role_to_overwrite' message in history.";
     $non_query_acts++;
@@ -1018,13 +1018,13 @@ if (defined $opt->output_last || defined $opt->conv_last) {
     my $dest = ($opt->output_last//0) ? '-' : $opt->conv_last;
     die "ERROR: Request for --output-last while also providing a query. We don't know how to resolve the mixed output. Aborting."
         if defined $uprompt;
-    
+
     $zchat->history->load();
     die "Conversation history is empty; nothing to output.\n" if $zchat->history->empty();
-    
+
     my $last = $zchat->history->get_last();
     my $content = $last->{assistant} ? $last->{assistant}{content} : ($last->{user} ? $last->{user}{content} : '');
-    
+
     if ($dest eq '-') {
         print $content;
         print "\n" if $content !~ /\n$/;
@@ -1045,11 +1045,11 @@ sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . $zchat->get_session_name() 
 if ($opt->edit_hist) {
     die "Input-only mode - editing makes no sense\n" if $opt->input_only;
     die "No-history mode - editing makes no sense\n" if $opt->no_history;
-    
+
     my $session_name = $zchat->get_session_name();
     my $session_dir = $zchat->{storage}->get_session_dir($session_name);
     my $history_file = File::Spec->catfile($session_dir, 'history.json');
-    
+
     system($editor, '--', $history_file);
     sel 0, "Exiting after editing.";
     exit;
@@ -1111,30 +1111,30 @@ if (defined $uprompt && length $uprompt) {
 # Handle history modifications without LLM completion
 if ($opt->no_complete) {
     $zchat->history->load();
-    
+
     # Add user message if provided
     if (defined $uprompt && $uprompt ne '') {
         $zchat->history->append('user', $uprompt);
         sel 1, "Added user message to history";
     }
-    
+
     # Add tool results if provided
     if ($has_tool_results) {
         for my $tool_result (@$tool_results) {
             my $meta = { tool_name => $tool_result->{name} };
             $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
-            
+
             $zchat->history->append('tool', $tool_result->{data}, $meta);
             sel 1, "Added tool result to history: $tool_result->{name}";
         }
     }
-    
+
     # Add assistant message if provided
     if ($opt->append_ast) {
         $zchat->history->append('assistant', $opt->append_ast);
         sel 1, "Added assistant message to history";
     }
-    
+
     $zchat->history->save();
 }
 
@@ -1153,6 +1153,15 @@ $term->add_defun("accept-line", sub {
     $term->call_function("accept-line", $count, $key);
 }, ord("\n"));
 
+# Handle alt-enter (^[\n) and shift-enter (^[OM) as soft enter - insert newline without executing
+$term->add_defun("insert-newline", sub { my ($count, $key) = @_; $term->insert_text("\n"); });
+
+# Bind escape + enter to insert-newline
+# First, we need to bind a timeout handler for escape sequences
+# $term->parse_and_bind('set keyseq-timeout 25');  # 100ms timeout
+$term->parse_and_bind('"\e\C-m": insert-newline');  # ESC + LF
+$term->parse_and_bind('"\eOM": insert-newline');   # ESC + O + M
+
 while (1) {
     my $line = $term->readline($intmode_prompt);
     print "$rst";
@@ -1162,7 +1171,7 @@ while (1) {
     $term->write_history($readline_histfile);
 
     tts_str($line) if $opt->play_user; # TTS user input
-        
+
     # # Add images to user input if present
     # if (@image_data) {
     #     # For now, just mention images in prompt
@@ -1172,7 +1181,7 @@ while (1) {
     #     }
     #     $uprompt .= "\n\nImages attached: " . join(", ", @img_mentions);
     # }
-    
+
     # Make completion request
     print $clr_sys;
     my $response = $zchat->query($line, { stream=>1 } );
@@ -1202,7 +1211,7 @@ z - Command-line interface to ZChat LLM system
 
     # Basic usage
     z "Hello, how are you?"
-    
+
     # Choose/override a system prompt
     z --system-file prompts/coding.md "Write a Perl function"
     z --system-str  "You are terse"    "Refactor this module"
@@ -1210,21 +1219,21 @@ z - Command-line interface to ZChat LLM system
 
     # Interactive mode
     z -i
-    
+
     # Pin management
     z --pin "You are a helpful assistant" --pins-list
     z --pins-sum
     z --pins-clear
-    
-    # Session management  
+
+    # Session management
     z -n myproject/analysis "What should I focus on?"
     z --system-file prompts/base.md -S              # Store in user global config
     z -n project --system-str "Prefer REST" --ss   # Store in current session
-    
+
     # Images
     z --img photo.jpg "What's in this image?"
     z --clipboard  # Use clipboard content
-    
+
     # Utility
     z -T "Count tokens in this text"
     z --ctx  # Show model context size

@@ -254,7 +254,7 @@ sub write_json_file($filepath, $data, $optshro=undef) {
     $old_umask = umask($umask) if defined $umask; # Set only if set
 
     eval {
-        my $json = JSON::XS->new->pretty(1)->utf8->space_after;
+        my $json = JSON::XS->new->pretty(1)->space_after;
         my $json_text = $json->encode($data);
         write_text($filepath, $json_text);
     };

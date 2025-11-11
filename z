@@ -509,6 +509,7 @@ my $zchat = ZChat->new(
 
 if ($opt->max_ctx) {
     $zchat->set_model_cmax($opt->max_ctx);
+    $non_query_acts++;
 }
 
 # Apply configuration/storage changes early (before any blocking/editor work)

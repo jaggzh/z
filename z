@@ -619,7 +619,7 @@ if ($opt->wipe) {
     $non_query_acts++;
 } elsif ($opt->wipeold) { # Wipe old messages
     $zchat->history->load();
-    my $removed_count = eval { $zchat->history->wipeold($opt->wipeold) };
+    my $removed_count = eval { $zchat->history->wipe_old($opt->wipeold) };
     if ($@) {
         die "${bred}ERROR: $@$rst";
     }

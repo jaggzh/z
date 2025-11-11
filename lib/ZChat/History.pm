@@ -85,7 +85,7 @@ sub append {
 sub wipe_old {
     my ($self, $age_spec) = @_;
     
-    die "wipe_old: age specification required (e.g., '1.5h', '2d', '1w')\n" unless defined $age_spec;
+    die "wipe_old: age specification required (e.g., '10s', ... '1.5h', '2d', '1w')\n" unless defined $age_spec;
     
     $self->load();
     

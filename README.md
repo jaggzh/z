@@ -511,8 +511,16 @@ $ cd zchat
 $ ./z "Hello world"  # Just works (maybe)
 ```
 
-Dependencies are standard CPAN modules that most Perl installations include.
-(Sorry, I've not fleshed out what they are for you to install them.)
+Unless you have a Perl installation, you will also need to install dependencies. 
+
+For Arch:
+
+```bash
+sudo pacman -S perl-string-shellquote perl-json-xs perl-yaml-libyaml imagemagick perl-module-install perl-file-slurper perl-term-readline-gnu
+sudo yay -S perl-mojolicious perl-text-xslate perl-term-size perl-getopt-long-descriptive perl-clipboard
+```
+
+(Sorry, I've not fleshed out what they are on other distros for you to install them.)
 For missing modules:
 
 ```bash

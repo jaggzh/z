@@ -77,7 +77,7 @@ sub help_sec($str) { "\033[44;33;1m $str $rst" }
 my ($opt, $usage) = describe_options(
     'z %o [prompt]',
     [ 'help|h',             "This beautiful help" ],
-    [ 'long-help|hh',       "Help with ${bmag}Examples$rst and other good stuff",
+    [ 'long-help|examples|hh', "Help with ${bmag}Examples$rst and other good stuff",
                                 { implies=>'help' } ],
     [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
     [ 'verbose-resp|vr+',   "Verbose response data" ],
@@ -210,7 +210,17 @@ my ($opt, $usage) = describe_options(
 if ($opt->help) {
     my $pager = pager();
     print $pager ($usage->text);
-    print $pager "\nBasic usage (Version: $VERSION):\n";
+    print $pager <<~'EOT';
+
+    Backend location in your favorite env var(s)
+     [currently supported backends: llama.cpp, ollama, openai]:
+     Defaults to 127.0.0.1 port 8080.
+      LLAMA_URL LLAMA_API_URL LLAMACPP_SERVER LLAMA_CPP_SERVER LLM_API_URL
+      OPENAI_BASE_URL OPENAI_API_BASE OPENAI_URL
+     Optional key:
+      OPENAI_API_KEY LLAMA_API_KEY AZURE_OPENAI_API_KEY
+    EOT
+    print $pager "\nBasic usage (Version: $VERSION) (see ${yel}--examples$rst / ${yel}--long-help$rst / ${yel}--hh$rst):\n";
     if ($opt->long_help) {
         print $pager <<~'EOT';
             $ z "My query" # LLM output to stdout. History stored in 'default'

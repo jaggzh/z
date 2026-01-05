@@ -14,6 +14,8 @@ use POSIX;
 use Cwd qw(abs_path);
 use File::Basename qw(dirname);
 use JSON::XS;
+use File::Slurper qw(read_binary);
+use MIME::Base64;
 
 use ZChat::Core;
 use ZChat::Config;
@@ -23,6 +25,7 @@ use ZChat::Utils ':all';
 use ZChat::History;
 use ZChat::SystemPrompt;
 use ZChat::ansi;
+use ZChat::Media;
 
 our $VERSION = '1.1.0';
 
@@ -72,6 +75,11 @@ sub new {
         storage => $self->{storage},
         session_name => $self->{session_name}
     );
+
+    $self->{media_mgr} = ZChat::Media->new(
+        storage => $self->{storage},
+        session_name => $self->{session_name}
+    ) if $self->{session_name};
 
     $self->{history} = ZChat::History->new(
         storage => $self->{storage},
@@ -707,6 +715,44 @@ sub query($self, $user_text, $optshro=undef) {
 
     $self->{history}->load();
 
+    # MEDIA: Load media if IDs provided
+    my @media_items;
+    if ($optshro->{media_ids} && @{$optshro->{media_ids}}) {
+        unless ($self->{media_mgr}) {
+            $self->{media_mgr} = ZChat::Media->new(
+                storage => $self->{storage},
+                session_name => $self->get_session_name()
+            );
+        }
+        
+        for my $id (@{$optshro->{media_ids}}) {
+            my $media = $self->{media_mgr}->get_media_by_id($id);
+            unless ($media) {
+                swarn "Media ID not found: $id";
+                next;
+            }
+            
+            my $full_path = $self->{media_mgr}->get_media_full_path($id);
+            unless ($full_path && (-f $full_path || -l $full_path)) {
+                swarn "Media file not accessible: $full_path";
+                next;
+            }
+            
+            my $content = read_binary($full_path);
+            my $base64 = encode_base64($content, '');
+            
+            push @media_items, {
+                id => $id,
+                type => $media->{type_major},
+                mime_type => $media->{mime_type},
+                data => $base64,
+            };
+            
+            sel 2, "Loaded media: $id ($$media{type_major}, $$media{mime_type})";
+        }
+    }
+
+
     # Get system content and auto-detect thought patterns
     my $system_content = $self->_get_system_content();
     if ($system_content) {
@@ -796,7 +842,8 @@ sub query($self, $user_text, $optshro=undef) {
             stream => 1,
             on_chunk => $cb,
             fallbacks_ok => $self->{_fallbacks_ok},
-            append_tool_calls => $optshro->{append_tool_calls}
+            append_tool_calls => $optshro->{append_tool_calls},
+            media_items => \@media_items,
         });
 
         # Extract content and metadata from result
@@ -846,9 +893,12 @@ sub query($self, $user_text, $optshro=undef) {
 
     # Store in history with metadata
     if (defined $user_text && $user_text ne '') {
-        $self->{history}->append('user', $user_text, {
+        my $user_meta = {
             request_time => $response_metadata->{request_time} || time,
-        });
+        };
+        $user_meta->{media_ids} = $optshro->{media_ids} if $optshro->{media_ids};
+        
+        $self->{history}->append('user', $user_text, $user_meta);
     }
 
     # Store tool results in history if provided

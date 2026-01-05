@@ -85,8 +85,6 @@ my ($opt, $usage) = describe_options(
     [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
     [ 'verbose-resp|vr+',   "Verbose response data" ],
     [ 'quiet|q',            "Quiet unimportant warnings (right now the warning of no-query)" ],
-    [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt) (This is old and needs updating)" ],
-    [ 'clipboard|cb',       "Use clipboard content as Query" ],
     [ 'interactive|int|i',  "Interactive mode (query on CLI can be included as first message)" ],
     [ 'echo1|e',            "Echo back initial prompt" ],
     [ 'echo-delineated|echod|ee', "Echo with <echo></echo> and <reply></reply> tags" ],
@@ -165,6 +163,9 @@ my ($opt, $usage) = describe_options(
     [ 'print-session-dir|pssd', "Print just the resolved session path (used by completion/shell-tools.sh). --st for full details" ],
     [],
     [ help_sec('Media:') ],
+    # Ref: MEDIA. Old image and clipboard support never integrated
+    # [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt) (This is old and needs updating)" ],
+    [ 'clipboard|cb',       "Use clipboard content as Query" ],
     [ 'image|img=s',      "Copy image to session: path or <name>path",
         { callbacks => { img => sub { push @media, {type=>'image', path=>$_[0], external=>0} } } } ],
     [ 'image-ext|img-ext|iext=s', "Reference external image: path or <name>path",  
@@ -522,88 +523,6 @@ if ($opt->image) {
     $use_images = 1;
 }
 
-# MEDIA: Process media (images, audio)
-my @media_ids;
-if (@media || $opt->ialias || $opt->aalias) {
-    $zchat->{media_mgr} = ZChat::Media->new(
-        storage => $zchat->{storage},
-        session_name => $zchat->get_session_name()
-    );
-    
-    # Handle aliases first
-    if ($opt->ialias) {
-        for my $spec (@{$opt->ialias}) {
-            eval { $zchat->{media_mgr}->alias_media('image', $spec); };
-            if ($@) { serr "Image alias failed: $@"; exit 1; }
-        }
-        $non_query_acts++;
-    }
-    if ($opt->aalias) {
-        for my $spec (@{$opt->aalias}) {
-            eval { $zchat->{media_mgr}->alias_media('audio', $spec); };
-            if ($@) { serr "Audio alias failed: $@"; exit 1; }
-        }
-        $non_query_acts++;
-    }
-    
-    # Add media files
-    for my $m (@media) {
-        # Parse name from path
-        my ($name, $path);
-        if ($m->{path} =~ /^<([^>]+)>(.+)$/) {
-            ($name, $path) = ($1, $2);
-        } else {
-            $path = $m->{path};
-        }
-        
-        my $id;
-        eval {
-            if ($m->{type} eq 'image') {
-                $id = $zchat->{media_mgr}->add_image($path, {
-                    name => $name,
-                    external => $m->{external}
-                });
-            } elsif ($m->{type} eq 'audio') {
-                $id = $zchat->{media_mgr}->add_audio($path, {
-                    name => $name,
-                    external => $m->{external}
-                });
-            }
-        };
-        if ($@) {
-            serr "Failed to add $m->{type}: $@";
-            exit 1;
-        }
-        
-        push @media_ids, $id if defined $id;
-    }
-}
-
-# Handle --media listing
-if ($opt->media) {
-    unless ($zchat->{media_mgr}) {
-        $zchat->{media_mgr} = ZChat::Media->new(
-            storage => $zchat->{storage},
-            session_name => $zchat->get_session_name()
-        );
-    }
-    
-    my $list = $zchat->{media_mgr}->list_media();
-    
-    if (@$list) {
-        for my $m (@$list) {
-            my $name_str = defined $m->{name} ? " [$m->{name}]" : "";
-            my $ext_str = $m->{external} ? " (ext)" : "";
-            printf "%s: %s%s%s - %s bytes - %s\n",
-                $m->{id}, $m->{type}, $name_str, $ext_str, $m->{size}, $m->{mime};
-        }
-    } else {
-        sel 1, "No media in session";
-    }
-    $non_query_acts++;
-    # Should probably exit
-}
-
 my $zchat = ZChat->new(
     session => $opt->session // '',
     verbose => $verbose,
@@ -825,6 +744,88 @@ if ($opt->ctx_info) {
         say "Based on $$cache{samples} samples";
     }
     exit;
+}
+
+# MEDIA: Process media (images, audio)
+my @media_ids;
+if (@media || $opt->image_alias || $opt->audio_alias) {
+    $zchat->{media_mgr} = ZChat::Media->new(
+        storage => $zchat->{storage},
+        session_name => $zchat->get_session_name()
+    );
+    
+    # Handle aliases first
+    if ($opt->image_alias) {
+        for my $spec (@{$opt->image_alias}) {
+            eval { $zchat->{media_mgr}->alias_media('image', $spec); };
+            if ($@) { serr "Image alias failed: $@"; exit 1; }
+        }
+        $non_query_acts++;
+    }
+    if ($opt->audio_alias) {
+        for my $spec (@{$opt->audio_alias}) {
+            eval { $zchat->{media_mgr}->alias_media('audio', $spec); };
+            if ($@) { serr "Audio alias failed: $@"; exit 1; }
+        }
+        $non_query_acts++;
+    }
+    
+    # Add media files
+    for my $m (@media) {
+        # Parse name from path
+        my ($name, $path);
+        if ($m->{path} =~ /^<([^>]+)>(.+)$/) {
+            ($name, $path) = ($1, $2);
+        } else {
+            $path = $m->{path};
+        }
+        
+        my $id;
+        eval {
+            if ($m->{type} eq 'image') {
+                $id = $zchat->{media_mgr}->add_image($path, {
+                    name => $name,
+                    external => $m->{external}
+                });
+            } elsif ($m->{type} eq 'audio') {
+                $id = $zchat->{media_mgr}->add_audio($path, {
+                    name => $name,
+                    external => $m->{external}
+                });
+            }
+        };
+        if ($@) {
+            serr "Failed to add $m->{type}: $@";
+            exit 1;
+        }
+        
+        push @media_ids, $id if defined $id;
+    }
+}
+
+# Handle --media listing
+if ($opt->media) {
+    unless ($zchat->{media_mgr}) {
+        $zchat->{media_mgr} = ZChat::Media->new(
+            storage => $zchat->{storage},
+            session_name => $zchat->get_session_name()
+        );
+    }
+    
+    my $list = $zchat->{media_mgr}->list_media();
+    
+    if (@$list) {
+        for my $m (@$list) {
+            my $name_str = defined $m->{name} ? " [$m->{name}]" : "";
+            my $ext_str = $m->{external} ? " (ext)" : "";
+            printf "%s: %s%s%s - %s bytes - %s\n",
+                $m->{id}, $m->{type}, $name_str, $ext_str, $m->{size}, $m->{mime};
+        }
+    } else {
+        sel 1, "No media in session";
+    }
+    $non_query_acts++;
+    # Should probably exit
 }
 
 

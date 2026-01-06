@@ -92,12 +92,6 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
     --verbose (or -v)        Increase verbosity
     --verbose-resp           Verbose response data
                              aka --vr
-    --image[=STR...]         Provide images (use [img] or
-                             [img-1]..[img-N] in prompt) (This is old and
-                             needs updating)
-                             aka --img
-    --clipboard              Use clipboard content as Query
-                             aka --cb
     --interactive (or -i)    Interactive mode (query on CLI can be
                              included as first message)
                              aka --int
@@ -182,6 +176,24 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
     --status                 Show current configuration status and
                              precedence
                              aka --stat
+
+    Media:  
+    --clipboard              Use clipboard content as Query (needs
+                             reintegration. Not working.  aka --cb
+    --image STR              Copy image to session: path or <name>path
+                             aka --img
+    --image-ext STR          Reference external image: path or <name>path
+                             aka --img-ext, --iext
+    --image-alias STR        Assign/change image name: <n>path or
+                             <new><old>
+                             aka --img-alias, --ialias
+    --audio STR              Copy audio to session: path or <name>path
+    --audio-ext STR          Reference external audio: path or <name>path
+                             aka --au-ext, --aext
+    --audio-alias STR        Assign/change audio name: <n>path or
+                             <new><old>
+                             aka --au-alias, --aalias
+    --media                  List all media in current session
 
     Message pinning (see --help-pins):
     --pin STR...             Add pinned message(s)

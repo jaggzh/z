@@ -20,6 +20,7 @@ use ZChat::Storage;
 use ZChat::Config;
 use ZChat::Pin;
 use ZChat::ContextManager;
+use ZChat::Media;
 use ZChat::Utils ':all';
 use ZChat::ansi ':all';
 
@@ -72,18 +73,18 @@ my $intmode_prompt = "$C_IGN_S$gra${C_IGN_E}>> $C_IGN_S$rst$clr_user$C_IGN_E";
 my $clr_notice_bg = a24bg(30,155,30);
 my $clr_notice_fg = $whi;
 
+my @media;  # Populated by callbacks, preserves CLI order
+
 sub help_sec($str) { "\033[44;33;1m $str $rst" }
 
 my ($opt, $usage) = describe_options(
     'z %o [prompt]',
     [ 'help|h',             "This beautiful help" ],
-    [ 'long-help|hh',       "Help with ${bmag}Examples$rst and other good stuff",
+    [ 'long-help|examples|hh', "Help with ${bmag}Examples$rst and other good stuff",
                                 { implies=>'help' } ],
     [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
     [ 'verbose-resp|vr+',   "Verbose response data" ],
     [ 'quiet|q',            "Quiet unimportant warnings (right now the warning of no-query)" ],
-    [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt) (This is old and needs updating)" ],
-    [ 'clipboard|cb',       "Use clipboard content as Query" ],
     [ 'interactive|int|i',  "Interactive mode (query on CLI can be included as first message)" ],
     [ 'echo1|e',            "Echo back initial prompt" ],
     [ 'echo-delineated|echod|ee', "Echo with <echo></echo> and <reply></reply> tags" ],
@@ -161,6 +162,23 @@ my ($opt, $usage) = describe_options(
     [ 'status|stat|st',     "Show current configuration status and precedence" ],
     [ 'print-session-dir|pssd', "Print just the resolved session path (used by completion/shell-tools.sh). --st for full details" ],
     [],
+    [ help_sec('Media (experimental):') ],
+    # Ref: MEDIA. Old image and clipboard support never integrated
+    # [ 'image|img:s@',       "Provide images (use [img] or [img-1]..[img-N] in prompt) (This is old and needs updating)" ],
+    [ 'clipboard|cb',       "Use clipboard content as Query. (Needs to be re-integrated. Not currently working." ],
+    [ 'image|img=s',      "Copy image to session: path or <name>path",
+        { callbacks => { img => sub { push @media, {type=>'image', path=>$_[0], external=>0} } } } ],
+    [ 'image-ext|img-ext|iext=s', "Reference external image: path or <name>path",  
+        { callbacks => { iext => sub { push @media, {type=>'image', path=>$_[0], external=>1} } } } ],
+    [ 'image-alias|img-alias|ialias=s', "Assign/change image name: <n>path or <new><old>" ],
+    
+    [ 'audio=s',          "Copy audio to session: path or <name>path",
+        { callbacks => { audio => sub { push @media, {type=>'audio', path=>$_[0], external=>0} } } } ],
+    [ 'audio-ext|au-ext|aext=s', "Reference external audio: path or <name>path",
+        { callbacks => { aext => sub { push @media, {type=>'audio', path=>$_[0], external=>1} } } } ],
+    [ 'audio-alias|au-alias|aalias=s', "Assign/change audio name: <n>path or <new><old>" ],
+    [ 'media',            "List all media in current session" ],
+    [],
     [ help_sec('Message pinning (see --help-pins):') ],
     [ 'pin=s@',             "Add pinned message(s)" ],
     [ 'pins-file=s@',       "Add pinned message(s) from file(s)" ],
@@ -193,8 +211,8 @@ my ($opt, $usage) = describe_options(
     [ help_sec('Tools (new, experimental):') ],
     [ 'tool-result=s@',     "Post tool result: --tool-result 'name:data' or '[id]name:data'" ],
     [ 'append-tool-calls',  "Append structured tool calls to assistant content as TOOL_CALL lines" ],
-    [ 'no-complete',        "Do not query LLM (used with history modification options)" ],
-    [ 'append-ast=s',       "Append assistant message to history (implies --no-complete)",
+    [ 'no-complete|append-user',  "Append user message to history (specify query like normal)." ],
+    [ 'append-ast=s',       "Append assistant message to history (specify query as the string arg to this option).",
                                 { implies => 'no_complete' } ],
     [],
     [ help_sec('Help:') ],
@@ -210,8 +228,18 @@ my ($opt, $usage) = describe_options(
 if ($opt->help) {
     my $pager = pager();
     print $pager ($usage->text);
+    print $pager <<~'EOT';
+
+    Backend location in your favorite env var(s)
+     [currently supported backends: llama.cpp, ollama, openai]:
+     Defaults to 127.0.0.1 port 8080.
+      LLAMA_URL LLAMA_API_URL LLAMACPP_SERVER LLAMA_CPP_SERVER LLM_API_URL
+      OPENAI_BASE_URL OPENAI_API_BASE OPENAI_URL
+     Optional key:
+      OPENAI_API_KEY LLAMA_API_KEY AZURE_OPENAI_API_KEY
+    EOT
     if ($opt->long_help) {
-        print $pager "\nBasic usage (Version: $VERSION):\n";
+        print $pager "\nBasic usage (Version: $VERSION) (see ${yel}--examples$rst / ${yel}--long-help$rst / ${yel}--hh$rst):\n";
         print $pager <<~'EOT';
             $ z "My query" # LLM output to stdout. History stored in 'default'
               # (~/.config/zchat/sessions/default/history.json)
@@ -472,6 +500,10 @@ if ($has_tool_results && defined $uprompt && length $uprompt) {
     exit 1;
 }
 
+# OLD: --image code
+# Ref: MEDIA
+# Note: Old --image and --clipboard code can remain but won't integrate with new system
+# for now. This creates @image_data but it's not used. Clean up in future revision.
 if ($opt->image) {
     for my $index (0..$#{$opt->image}) {
         my $image_path = $opt->image->[$index];
@@ -713,6 +745,88 @@ if ($opt->ctx_info) {
         say "Based on $$cache{samples} samples";
     }
     exit;
+}
+
+# MEDIA: Process media (images, audio)
+my @media_ids;
+if (@media || $opt->image_alias || $opt->audio_alias) {
+    $zchat->{media_mgr} = ZChat::Media->new(
+        storage => $zchat->{storage},
+        session_name => $zchat->get_session_name()
+    );
+    
+    # Handle aliases first
+    if ($opt->image_alias) {
+        for my $spec (@{$opt->image_alias}) {
+            eval { $zchat->{media_mgr}->alias_media('image', $spec); };
+            if ($@) { serr "Image alias failed: $@"; exit 1; }
+        }
+        $non_query_acts++;
+    }
+    if ($opt->audio_alias) {
+        for my $spec (@{$opt->audio_alias}) {
+            eval { $zchat->{media_mgr}->alias_media('audio', $spec); };
+            if ($@) { serr "Audio alias failed: $@"; exit 1; }
+        }
+        $non_query_acts++;
+    }
+    
+    # Add media files
+    for my $m (@media) {
+        # Parse name from path
+        my ($name, $path);
+        if ($m->{path} =~ /^<([^>]+)>(.+)$/) {
+            ($name, $path) = ($1, $2);
+        } else {
+            $path = $m->{path};
+        }
+        
+        my $id;
+        eval {
+            if ($m->{type} eq 'image') {
+                $id = $zchat->{media_mgr}->add_image($path, {
+                    name => $name,
+                    external => $m->{external}
+                });
+            } elsif ($m->{type} eq 'audio') {
+                $id = $zchat->{media_mgr}->add_audio($path, {
+                    name => $name,
+                    external => $m->{external}
+                });
+            }
+        };
+        if ($@) {
+            serr "Failed to add $m->{type}: $@";
+            exit 1;
+        }
+        
+        push @media_ids, $id if defined $id;
+    }
+}
+
+# Handle --media listing
+if ($opt->media) {
+    unless ($zchat->{media_mgr}) {
+        $zchat->{media_mgr} = ZChat::Media->new(
+            storage => $zchat->{storage},
+            session_name => $zchat->get_session_name()
+        );
+    }
+    
+    my $list = $zchat->{media_mgr}->list_media();
+    
+    if (@$list) {
+        for my $m (@$list) {
+            my $name_str = defined $m->{name} ? " [$m->{name}]" : "";
+            my $ext_str = $m->{external} ? " (ext)" : "";
+            printf "%s: %s%s%s - %s bytes - %s\n",
+                $m->{id}, $m->{type}, $name_str, $ext_str, $m->{size}, $m->{mime};
+        }
+    } else {
+        sel 1, "No media in session";
+    }
+    $non_query_acts++;
+    # Should probably exit
 }
 
 
@@ -1084,10 +1198,11 @@ if (!$intmode || $opt->no_color) {
 if (defined $uprompt && length $uprompt) {
     tts_str($uprompt) if $opt->play_user;
 
-    unless ($opt->no_complete) {
+    if (!$opt->no_complete) {
         my $query_opts = { stream => 1 };
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results if $tool_results;
+        $query_opts->{media_ids} = \@media_ids if @media_ids;
         my $response = $zchat->query($uprompt, $query_opts);
 
         if ($opt->play_resp) {
@@ -1096,7 +1211,7 @@ if (defined $uprompt && length $uprompt) {
         }
     }
 } elsif ($has_tool_results) {
-    unless ($opt->no_complete) {
+    if (!$opt->no_complete) {
         my $query_opts = { stream => 1 };
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results;

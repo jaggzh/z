@@ -87,6 +87,46 @@ sub complete_request($self, $messages, $optshro=undef) {
         }
     }
 
+    # Convert last user message to multimodal if media present
+    my $media_items = $optshro->{media_items} || [];
+    if (@$media_items && @$messages && $messages->[-1]{role} eq 'user') {
+        my $user_text = $messages->[-1]{content};
+        my @content_parts;
+        
+        # Add text part
+        if (defined $user_text && length $user_text) {
+            push @content_parts, {
+                type => 'text',
+                text => $user_text
+            };
+        }
+        
+        # Add media parts
+        for my $m (@$media_items) {
+            if ($m->{type} eq 'image') {
+                push @content_parts, {
+                    type => 'image_url',
+                    image_url => {
+                        url => "data:$$m{mime_type};base64,$$m{data}"
+                    }
+                };
+                sel(3, "Added image to message: $$m{mime_type}");
+            } elsif ($m->{type} eq 'audio') {
+                push @content_parts, {
+                    type => 'input_audio',
+                    input_audio => {
+                        data => $m->{data},
+                        format => $m->{mime_type}
+                    }
+                };
+                sel(3, "Added audio to message: $$m{mime_type}");
+            }
+        }
+        
+        $messages->[-1]{content} = \@content_parts;
+        sel(2, "Converted user message to multimodal with " . @$media_items . " media items");
+    }
+
     # Default options
     my $temperature = $optshro->{temperature} || 0.7;
     my $top_k = $optshro->{top_k} || 40;

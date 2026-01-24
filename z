@@ -211,8 +211,8 @@ my ($opt, $usage) = describe_options(
     [ help_sec('Tools (new, experimental):') ],
     [ 'tool-result=s@',     "Post tool result: --tool-result 'name:data' or '[id]name:data'" ],
     [ 'append-tool-calls',  "Append structured tool calls to assistant content as TOOL_CALL lines" ],
-    [ 'no-complete',        "Do not query LLM (used with history modification options)" ],
-    [ 'append-ast=s',       "Append assistant message to history (implies --no-complete)",
+    [ 'no-complete|append-user',  "Append user message to history (specify query like normal)." ],
+    [ 'append-ast=s',       "Append assistant message to history (specify query as the string arg to this option).",
                                 { implies => 'no_complete' } ],
     [],
     [ help_sec('Help:') ],
@@ -1198,7 +1198,7 @@ if (!$intmode || $opt->no_color) {
 if (defined $uprompt && length $uprompt) {
     tts_str($uprompt) if $opt->play_user;
 
-    unless ($opt->no_complete) {
+    if (!$opt->no_complete) {
         my $query_opts = { stream => 1 };
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results if $tool_results;
@@ -1211,7 +1211,7 @@ if (defined $uprompt && length $uprompt) {
         }
     }
 } elsif ($has_tool_results) {
-    unless ($opt->no_complete) {
+    if (!$opt->no_complete) {
         my $query_opts = { stream => 1 };
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results;

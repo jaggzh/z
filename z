@@ -77,6 +77,8 @@ my @media;  # Populated by callbacks, preserves CLI order
 
 sub help_sec($str) { "\033[44;33;1m $str $rst" }
 
+@ARGV = map { decode('UTF-8', $_) } @ARGV;
+
 my ($opt, $usage) = describe_options(
     'z %o [prompt]',
     [ 'help|h',             "This beautiful help" ],
@@ -222,8 +224,6 @@ my ($opt, $usage) = describe_options(
     [ 'help-cli-adv',       "cli use - Advanced", ],
     [ 'version',            "Show version ($VERSION)", ],
 );
-
-@ARGV = map { decode('UTF-8', $_) } @ARGV;
 
 if ($opt->help) {
     my $pager = pager();

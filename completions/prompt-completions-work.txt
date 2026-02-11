@@ -1,3 +1,13 @@
+  __complete_sessions() {                                                                                                                                                          
+    local -a names                                                                                                                                                                 
+    mapfile -t names < <(cd "$dir_sessions_user" && find . -type d | grep -v '^\.$' | sed -e 's#^./##')                                                                            
+    COMPREPLY=("${names[@]}")                                                                                                                                                      
+  }
+
+I have this in my bash completions script for my project.
+
+The full completions script:
+---
 # --- z completion (install-friendly, relocatable) ---
 
 # Optional: persona l
@@ -72,70 +82,48 @@ __z_collect_presets() {
 __z_opts() {
   cat <<'OPTS'
 -h --help
---long-help --examples --hh
--v --verbose
---verbose-resp --vr
--q --quiet
-
+-v --verbose --verbose_resp --vr
+--image --img --clipboard --cb
 -i --interactive --int
--e --echo1
---echo-delineated --echod --ee
+-e --echo1 --echo-delineated --echod --ee
 -r --raw
---tokens-full
--T --token-count
-
---ctx
---ctx-info
---metadata
---update
---backend
---apiurl
---model
---stats-usage
---stats-usage-fmt
---max-ctx --ctx-hard --chard --cmax
-
+--tokens_full
+-T --token_count
+--ctx --metadata
 -P --n_predict
-
---play-user --pu
---play-resp --pr
+--pu --play_user
+--pr --play_resp
 --probs
-
---no-color --nc -C
+--no-color --nc
 -g --grammar
---thought --think
---thought-re --tre
+--think --thought
 
 --session -n
-
 --store-user --su -S
 --store-session --ss
---store-pproc --store-shell --sp
---set-pproc
+--store-pproc --sp
 
 --system-string --system-str --sstr
 --system-file --sfile
 --system-persona --spersona --persona
 --system --sys -s
 
+
 --del-user --du
 --del-session --ds
 --del-pproc --del-shell --dp
 
 --clear-user-system --cus
---clear-user-session --cun
 --clear-session-system --cns
 --clear-pproc-system --clear-shell-system --cps
+
+--clear-user-session --cun
 --clear-pproc-session --clear-shell-session --cpn
 
 -w --wipe
 --wipeold --wipeexp --we --wo
 -H --no-history
 -I --input-only
-
---dump-history --dump --dh
---dump-text --text --dt
-
 -E --edit-hist --eh
 --owrite-last
 --conv-last --cl
@@ -143,18 +131,10 @@ __z_opts() {
 
 -L --list-sys --sys-list
 --fallbacks-ok
---status --stat --st
+--status --stat
 --print-session-dir --pssd
 
---clipboard --cb
---image --img
---image-ext --img-ext --iext
---image-alias --img-alias --ialias
---audio
---audio-ext --au-ext --aext
---audio-alias --au-alias --aalias
---media
-
+--help-pins
 --pin
 --pins-file
 --pins-list
@@ -185,8 +165,8 @@ __z_opts() {
 
 --tool-result
 --append-tool-calls
---no-complete --append-user
 --append-ast
+--no-complete
 
 --help-sys-pin-vars
 --help-pins
@@ -227,75 +207,10 @@ _z() {
     done
   }
 
-## === -n / --session ===
-## Session folder handling
   __complete_sessions() {
-    local token="$1"
-    local prefix="" needle="$token"
-  
-    # If someone ever uses --session=foo style, preserve the "opt=" prefix.
-    if [[ "$needle" == *=* ]]; then
-      prefix="${needle%%=*}="
-      needle="${needle#*=}"
-    fi
-  
-    local base="$dir_sessions_user"
-    [[ -d "$base" ]] || return 0
-  
-    # Normalize: strip any leading "./"
-    needle="${needle#./}"
-  
-    local dirpart="" filepart="$needle"
-    local want_list_children=0
-  
-    if [[ "$needle" == */ ]]; then
-      want_list_children=1
-      dirpart="${needle%/}"
-      filepart=""
-    elif [[ "$needle" == */* ]]; then
-      dirpart="${needle%/*}"
-      filepart="${needle##*/}"
-    fi
-  
-    local target="$base"
-    [[ -n "$dirpart" ]] && target="$base/$dirpart"
-  
-    [[ -d "$target" ]] || return 0
-  
-    local -a matches=()
-    local child name cand
-  
-    # List immediate subdirectories of $target
-    while IFS= read -r -d '' child; do
-      name="${child##*/}"
-  
-      # Filter by typed prefix (filepart) unless we’re listing children after a trailing slash
-      if [[ -z "$filepart" || "$name" == "$filepart"* ]]; then
-        if [[ -n "$dirpart" ]]; then
-          cand="$dirpart/$name"
-        else
-          cand="$name"
-        fi
-        matches+=("$cand")
-      fi
-    done < <(find "$target" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
-  
-    # Special behavior:
-    # If the user typed an exact dir name (no slash) and it’s the only match,
-    # then return it with a trailing "/" so the next <tab> lists its children.
-    if [[ "$want_list_children" -eq 0 && "$needle" != */* && ${#matches[@]} -eq 1 && "${matches[0]}" == "$needle" ]]; then
-      local exact="$base/$needle"
-      if [[ -d "$exact" ]] && find "$exact" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q .; then
-        COMPREPLY=("${prefix}${needle}/")
-        return 0
-      fi
-    fi
-  
-    COMPREPLY=()
-    local m
-    for m in "${matches[@]}"; do
-      COMPREPLY+=("${prefix}${m}")
-    done
+    local -a names
+    mapfile -t names < <(cd "$dir_sessions_user" && find . -type d | grep -v '^\.$' | sed -e 's#^./##')
+    COMPREPLY=("${names[@]}")
   }
 
   case "$prev" in
@@ -359,3 +274,38 @@ __z_bind_completions() {
 __z_bind_completions
 
 # --- end z completion ---
+---
+
+As you can see, sessions are directories, like:
+-n llm
+-n llm/agents
+-n llm/subtopic
+
+Here are some actual folders I have:
+./zweb
+./zweb/docs
+./zweb/working
+./zweb/final
+
+When I type -n zwe<tab>
+it lists the whole main top-level dir of session names.
+I'd want it to complete 'zweb', and if tab were hit again, finding no other 'zwebfoo', it should then produce:
+-n zweb/
+
+Eg.
+$ z -n zwe<tab>
+$ z -n zweb
+$ z -n zweb<tab>
+$ z -n zweb/
+docs final working
+$ z -n zweb/<tab>
+$ z -n zweb/docs<tab>
+$ z -n zweb/final<tab>
+$ z -n zweb/working<tab>
+or:
+$ z -n zweb/d<tab>
+$ z -n zweb/docs
+$ z -n zweb/docs<tab>
+# There are no subdirs in docs so it should not do anything at that last one.
+
+How do I go about doing this? What are our options?

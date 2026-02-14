@@ -164,7 +164,7 @@ sub get_model_context_size {
     my $model_key;
     
     # Try to get model name from cache first (fast path - no server hit)
-    unless ($force_refresh) {
+    if (!$force_refresh) {
         $model_name = $self->_get_cached_model_name();
         if ($model_name) {
             $model_key = join(':', 
@@ -176,7 +176,7 @@ sub get_model_context_size {
     }
     
     # Need to hit server to get model name
-    unless ($model_name) {
+    if (!defined $model_name) {
         sel(2, "Fetching model name from server");
         $model_name = $self->{core}->get_model_name($force_refresh);
         $model_key = eval { $self->{core}->get_model_key() } // $model_name;

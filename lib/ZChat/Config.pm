@@ -12,6 +12,7 @@ use File::Path qw(make_path);
 use ZChat::ParentID qw(get_parent_id);
 use ZChat::Utils ':all';
 use ZChat::ansi;
+use ZChat::Defaults;
 
 sub new {
     my ($class, %opts) = @_;
@@ -153,7 +154,7 @@ sub get_session_name($self) {
 sub _get_system_defaults {
     return {
         session => '',
-        system_string => 'You are a helpful AI assistant.',
+        system_string => $Defaults::DEFAULT_SYSTEM_STRING,
         pin_defaults => {
             role => 'system',
             method => 'concat',

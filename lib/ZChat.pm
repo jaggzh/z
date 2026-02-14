@@ -186,10 +186,27 @@ sub _load_config($self, $optshro=undef) {
     # Store resolved options for later retrieval by storage operations
     $self->{_resolved_cli_options} = \%resolved_cli;
     my $config = $self->{config}->load_effective_config(\%resolved_cli);
+    for my $scope (qw(shell session user)) {
+        my $key = "system_$scope";
+        if (defined $config->{$key}) {
+            my $resolved = $self->_resolve_and_narrow_system($config->{$key}, uc($scope));
+            if ($resolved) {
+                if ($resolved->{type} eq 'string') {
+                    $config->{"system_string_$scope"} = $resolved->{value};
+                } elsif ($resolved->{type} eq 'file') {
+                    $config->{"system_file_$scope"} = $resolved->{value};
+                } elsif ($resolved->{type} eq 'persona') {
+                    $config->{"system_persona_$scope"} = $resolved->{value};
+                }
+            }
+        }
+    }
+
 }
 
 sub _resolve_and_narrow_system {
     my ($self, $name, $source) = @_;
+    $DB::single=1;
 
     sel(1, "Resolving --system '$name' from $source");
 
@@ -493,6 +510,11 @@ sub _get_system_content {
 
     sel(2, "Final system content length: " . length($content)) if defined $content;
     return $content;
+}
+
+sub get_rendered_system_prompt {
+    my ($self) = @_;
+    return $self->_get_system_content();
 }
 
 sub _get_fallback_system_content {

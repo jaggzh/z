@@ -59,7 +59,7 @@ binmode *STDERR, "utf8";
 
 my $user = `whoami`; chomp $user;
 my $def_npredict = 8192;
-my $def_pin_max = 50;
+my $def_pin_max = 500; # Excessive max
 my @cmd_tts = ("voice-piper-interactive");
 my $verbose = 0;
 my $verbose_resp = 0;
@@ -153,6 +153,7 @@ my ($opt, $usage) = describe_options(
     [ 'input-only|I',       "Use history BUT do not write to it" ],
     [ 'dump-history|dump|dh', "Dump chat history (user, tool, assistant roles only)" ],
     [ 'dump-text|text|dt',       "Dump chat history (like User:...)" ],
+    [ 'dump-sys',           "Dump rendered system prompt and exit" ],
     [ 'edit-hist|eh|E',     "Edit history in $editor" ],
     [ 'owrite-last=s',      "Overwrite last history message for role (u|user|a|assistant) with current prompt" ],
     [ 'conv-last|cl=s',     "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
@@ -1167,6 +1168,14 @@ if ($opt->edit_hist) {
 
     system($editor, '--', $history_file);
     sel 0, "Exiting after editing.";
+    exit;
+}
+
+if ($opt->dump_sys) {
+    my $rendered = $zchat->get_rendered_system_prompt();
+    serr "Rendered system prompt is undef" if !defined $rendered;
+    $DB::single=1;
+    print $rendered;
     exit;
 }
 

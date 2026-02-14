@@ -17,6 +17,7 @@ our @EXPORT_OK = qw(
     DEFAULT_TOP_K
     DEFAULT_TOP_P
     DEFAULT_MIN_P
+	DEFAULT_SYSTEM_STRING
 );
 
 use constant {
@@ -41,6 +42,8 @@ use constant {
     DEFAULT_TOP_K => 40,
     DEFAULT_TOP_P => 0.9,
     DEFAULT_MIN_P => 0.08,
+
+	DEFAULT_SYSTEM_STRING => 'You are a helpful AI assistant.',
 };
 
 1;

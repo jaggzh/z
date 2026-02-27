@@ -87,11 +87,16 @@ Python developers discovering a typo crashed their program after an hour of proc
 ## So, here's `z -h`:
 
 ```
-z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
+z [-CEegHhIiLnPqrSsTvw] [long options...] [prompt]
     --help (or -h)           This beautiful help
+    --long-help              Help with Examples and other good
+                             stuff
+                             aka --examples, --hh
     --verbose (or -v)        Increase verbosity
     --verbose-resp           Verbose response data
                              aka --vr
+    --quiet (or -q)          Quiet unimportant warnings (right now the
+                             warning of no-query)
     --interactive (or -i)    Interactive mode (query on CLI can be
                              included as first message)
                              aka --int
@@ -102,30 +107,47 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
     --raw (or -r)            Raw output (no processing)
     --tokens-full            Output tokens of input text
     --token-count (or -T)    Count tokens in input text
-    --ctx                    Get running model n_ctx
-    --metadata               Get running model metadata
+    --ctx                    Get running model n_ctx (use --update to
+                             refresh cache)
+    --ctx-info               Get running model context - Detailed (use
+                             --update to refresh cache)
+    --metadata               Get running model metadata (use --update to
+                             refresh cache)
+    --update                 Force update/refresh (use with --ctx, etc.)
+    --backend STR            Use with --max-ctx and possibly other
+                             URL/API selection features
+    --apiurl STR             API URL (overrides environment)
+    --model STR              Model id/name to use for requests and keying
+                             persistent settings
+    --stats-usage            Print usage stats to stderr after each
+                             request
+    --stats-usage-fmt STR    Format for --stats-usage (pretty|json)
+    --max-ctx INT            Set persistent hard max context for this
+                             model (global, non-overridable)
+                             aka --ctx-hard, --chard, --cmax
     --n_predict INT (or -P)  Limit prediction length to N tokens
     --play-user              Play user text with TTS
                              aka --pu
     --play-resp              Play response text with TTS
                              aka --pr
     --probs                  Return probabilities for top N tokens
-    --no-color               Disable color in interactive mode
+    --no-color (or -C)       Disable color in interactive mode and --text
+                             dump output
                              aka --nc
-    --grammar STR (or -g)    Force a grammar
+    --grammar STR (or -g)    Force a grammar (string)
     --thought                Do not remove reasoning sections
                              aka --think
     --thought-re STR         Specify a regex for stripping reasoning
                              aka --tre
 
-    Storage options and Session management:
+     Storage options and Session management: 
     --session STR (or -n)    Session name (slash-separated path)
 
-    --store-user (or -S)     Store session in user global config
+    --store-user (or -S)     Store CLI settings in user global config
                              aka --su
-    --store-session          Store in current session config
+    --store-session          Store CLI settings in current session config
                              aka --ss
-    --store-pproc            Save session name and system-prompt settings
+    --store-pproc            Save a session name and/or system-prompt
                              tied to your current shell. This uses
                              SID+PPID in POSIX systems (and uses the
                              /proc/ file system to obtain the group
@@ -136,7 +158,7 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
                              SID+PPID fail to match you only have
                              yourself to blame.
 
-    System Prompt:         
+     System Prompt: 
     --system-string STR      Set system prompt as a literal string
                              (highest explicit source after file)
                              aka --system-str, --sstr
@@ -150,13 +172,46 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
                              (but does NOT accept a string)
                              aka --sys
 
-    History:               
+     Deleting things (but see History wipe section) 
+    --del-user               Wipe (delete) entire user global config
+                             aka --du
+    --del-session            Wipe (delete) entire session (history, pins,
+                             settings, ..)
+                             aka --ds
+    --del-pproc              Wipe (delete) shell-tied config
+                             aka --del-shell, --dp
+
+     Clearing individual settings. These are done AFTER other
+    settings establish the active priorities. 
+    --clear-user-system      Clear system prompts from user global config
+                             aka --cus
+    --clear-user-session     Clear session name from user global config
+                             aka --cun
+    --clear-session-system   Clear system prompts from current session
+                             config
+                             aka --cns
+    --clear-pproc-system     Clear from shell-tied config
+                             aka --clear-shell-system, --cps
+    --clear-pproc-session    Clear session name from shell-tied config
+                             aka --clear-shell-session, --cpn
+     Note: The above options allow you to clear at one level while
+    assigning a new one runtime OR storing it during the same run.
+      e.g. '--cps --system-file data/coder.txt --sp'
+     Note: You can't store a session name in a session. :)
+
+     History: 
     --wipe (or -w)           Wipe conversation history
     --wipeold STR            Wipe/expire msgs older than {FLOAT
                              TIME}[smhdwMyY] (e.g. 1.5h)
                              aka --wipeexp, --we, --wo
     --no-history (or -H)     Do not use history (no load, no store)
     --input-only (or -I)     Use history BUT do not write to it
+    --dump-history           Dump chat history (user, tool, assistant
+                             roles only)
+                             aka --dump, --dh
+    --dump-text              Dump chat history (like User:...)
+                             aka --text, --dt
+    --dump-sys               Dump rendered system prompt and exit
     --edit-hist (or -E)      Edit history in vim
                              aka --eh
     --owrite-last STR        Overwrite last history message for role
@@ -168,18 +223,23 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
                              '--conv-last -')
                              aka --ol
 
-    Utility:               
+     Utility: 
     --list-sys (or -L)       List available file and 'persona'-based
                              system prompts.
                              aka --sys-list
     --fallbacks-ok           OK to use fallbacks if things fail
     --status                 Show current configuration status and
                              precedence
-                             aka --stat
+                             aka --stat, --st
+    --print-session-dir      Print just the resolved session path (used
+                             by completion/shell-tools.sh). --st for full
+                             details
+                             aka --pssd
 
-    Media:  
-    --clipboard              Use clipboard content as Query (needs
-                             reintegration. Not working.  aka --cb
+     Media (experimental): 
+    --clipboard              Use clipboard content as Query. (Needs to be
+                             re-integrated. Not currently working.
+                             aka --cb
     --image STR              Copy image to session: path or <name>path
                              aka --img
     --image-ext STR          Reference external image: path or <name>path
@@ -195,7 +255,7 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
                              aka --au-alias, --aalias
     --media                  List all media in current session
 
-    Message pinning (see --help-pins):
+     Message pinning (see --help-pins): 
     --pin STR...             Add pinned message(s)
     --pins-file STR...       Add pinned message(s) from file(s)
     --pins-list              List all pinned messages (their lines will
@@ -211,6 +271,7 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
     --pins-sys-max INT       Max system pins
     --pins-user-max INT      Max user pins
     --pins-ast-max INT       Max assistant pins
+
     --pin-sys STR...         Add system pin(s)
     --pin-user STR...        Add user pin(s)
     --pin-ast STR...         Add assistant pin(s) (shorthand: ast)
@@ -232,39 +293,34 @@ z [-EegHhIiLnPrSsTvw] [long options...] [prompt]
                              vars|varsfirst|concat (default: concat)
     --pin-mode-ast STR       How to include assistant pins:
                              vars|varsfirst|concat (default: concat)
-    Help:                  
+
+     Tools (new, experimental): 
+    --tool-result STR...     Post tool result: --tool-result 'name:data'
+                             or '[id]name:data'
+    --append-tool-calls      Append structured tool calls to assistant
+                             content as TOOL_CALL lines
+    --no-complete            Append user message to history (specify
+                             query like normal).
+                             aka --append-user
+    --append-ast STR         Append assistant message to history (specify
+                             query as the string arg to this option).
+
+     Help:   
     --help-sys-pin-vars      Show quick example of template vars to use
                              for system pins
     --help-pins              Show detailed help for pinning
     --help-cli               CLI use - Basic
     --help-cli-adv           cli use - Advanced
+    --version                Show version (0.8b)
 
-Basic usage:
+Backend location in your favorite env var(s)
+ [currently supported backends: llama.cpp, ollama, openai]:
+ Defaults to 127.0.0.1 port 8080.
+  LLAMA_URL LLAMA_API_URL LLAMACPP_SERVER LLAMA_CPP_SERVER LLM_API_URL
+  OPENAI_BASE_URL OPENAI_API_BASE OPENAI_URL
+ Optional key:
+  OPENAI_API_KEY LLAMA_API_KEY AZURE_OPENAI_API_KEY
 
-Select or create 'myprj' session, store it active in the
- current shell session group, and perform a query, which will
- be stored in 'myprj' chat history.
-$ z -n myprj --sp -- "What's a SID and Session Group Leader?"
-
-Same, but subdirs can be used
-$ z -n myprj/subprj --sp -- "Help me"
-$ z -n myprj -- "One-time use of myprj, not saved."
-
-Store 'default' as user global session (to be used when session
- is not specified or not set with --sp in the current shell.
-$ z -n default --su # Store 'default' as user global session
-
-$ z I can query unsafely too.
-$ cat q.txt | z -
-
-System prompt name (from system files or through 'persona' bin)
- Here I'm specifying cat-talk as my session, and storing (-ss)
- its active system prompt name as 'my-cat'
-$ z --system my-cat --ss -n cat-talk -- "I stored my-cat in my 'session')
-
-Provide a path to the system prompt, and store it default in
- the 'cat-talk' session.
-$ z --system-file here/sys.txt --ss -n cat-talk -- "And a query."
 ```
 
 
@@ -280,12 +336,19 @@ $ z --system-file here/sys.txt --ss -n cat-talk -- "And a query."
 ```
 zchat/
 ├── z                       # CLI wrapper with all user-facing features
+├── completions/z.bash      # Bash tab-completion setup (source from .bashrc)
+├── help/
+│   ├── cli.md              # Diving into the use of the CLI (--help-cli-adv)
+│   └── pins.md             # Output with --help-pins
 ├── lib/
 │   ├── ZChat.pm            # Main orchestration layer
 │   └── ZChat/
 │       ├── Core.pm         # LLM API communication (streaming/sync)
 │       ├── Config.pm       # Configuration precedence chain
+│       ├── Defaults.pm     # System defaults are being moved here
+│       ├── ContextManager.pm # Retrieval/caching of context limit
 │       ├── History.pm      # Management of history/conversations
+│       ├── Media.pm        # Media handling/storage (e.g. Images/Audio)
 │       ├── Storage.pm      # File I/O with secure permissions
 │       ├── SystemPrompt.pm # Handling of System prompts, files, etc.
 │       ├── ParentID.pm     # Platform-independent Shell-tied session IDs

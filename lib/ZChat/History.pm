@@ -184,8 +184,8 @@ sub get_last($self, $optshro=undef) {
         return undef unless defined $idx;
         return $self->{_messages}[$idx];
     }
-    my $u = $self->get_last(role => 'user');
-    my $a = $self->get_last(role => 'assistant');
+    my $u = $self->get_last({ role => 'user' });
+    my $a = $self->get_last({ role => 'assistant' });
     return { user => $u, assistant => $a };
 }
 

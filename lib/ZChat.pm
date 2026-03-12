@@ -206,7 +206,6 @@ sub _load_config($self, $optshro=undef) {
 
 sub _resolve_and_narrow_system {
     my ($self, $name, $source) = @_;
-    $DB::single=1;
 
     sel(1, "Resolving --system '$name' from $source");
 
@@ -506,7 +505,16 @@ sub _get_system_content {
             pin_cnt       => $pin_cnt,
         };
         $content = $tpl->render_string($content, $vars);
-    }
+
+		# Apply pin mode concatenation if needed
+		my $pin_mode_sys = $self->{config}->get_pin_mode_sys() // 'vars';
+		$DB::single=1;
+		if (($pin_mode_sys eq 'concat' || $pin_mode_sys eq 'both') && @$sys_pins_ar) {
+			my $pins_block = join("\n", @$sys_pins_ar);
+			$content .= "\n\n" . $pins_block;
+			sel(2, "Appended " . scalar(@$sys_pins_ar) . " system pins (mode: $pin_mode_sys)");
+		}
+	}
 
     sel(2, "Final system content length: " . length($content)) if defined $content;
     return $content;

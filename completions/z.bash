@@ -118,9 +118,9 @@ __z_opts() {
 --system-persona --spersona --persona
 --system --sys -s
 
---del-user --du
---del-session --ds
---del-pproc --del-shell --dp
+--del-user --rm-u
+--del-session --rm-s
+--del-pproc --del-shell --rm-p
 
 --clear-user-system --cus
 --clear-user-session --cun
@@ -135,6 +135,7 @@ __z_opts() {
 
 --dump-history --dump --dh
 --dump-text --text --dt
+--dump-sys --ds
 
 -E --edit-hist --eh
 --owrite-last

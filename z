@@ -127,9 +127,9 @@ my ($opt, $usage) = describe_options(
     [ 'system|sys|s=s',     "Auto-resolve through -file then -persona (but does NOT accept a string)" ],
     [],
     [ help_sec('Deleting things (but see History wipe section)') ],
-    [ 'del-user|du', "Wipe (delete) entire user global config" ],
-    [ 'del-session|ds', "Wipe (delete) entire session (history, pins, settings, ..)" ],
-    [ 'del-pproc|del-shell|dp', "Wipe (delete) shell-tied config" ],
+    [ 'del-user|rm-u', "Wipe (delete) entire user global config" ],
+    [ 'del-session|rm-s', "Wipe (delete) entire session (history, pins, settings, ..)" ],
+    [ 'del-pproc|del-shell|rm-p', "Wipe (delete) shell-tied config" ],
     [],
 
     [ help_sec('Clearing individual settings. These are done AFTER other settings establish the active priorities.') ],
@@ -742,8 +742,15 @@ if ($opt->ctx_info) {
 
     my $cache = $ctx_mgr->{cache}{"ratio_$model"};
     if ($cache) {
-        say "Char/token ratio: " . sprintf("%.2f", $cache->{ratio});
-        say "Based on $$cache{samples} samples";
+        my $ratio;
+        my $samples;
+        if (!exists $cache->{ratio}) {
+            $ratio = "Doesn't exist (yet?)";
+        } else {
+            $ratio = sprintf("%.2f", $cache->{ratio});
+        }
+        say "Char/token ratio: $ratio";
+        say "Based on " . ($$cache{samples} // "n/a") . " samples";
     }
     exit;
 }

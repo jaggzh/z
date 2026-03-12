@@ -45,9 +45,9 @@ Below is everything you need: options (complete), quick recipes for common needs
 | `--pin-shim` | `STR` | Append a shim to **user/assistant** pinned messages when building the request (e.g., `<pin-shim/>`). | To **persist** the shim default, combine with `-S` (store user) or `--ss` (store session). |
 | `--pin-tpl-user` | `STR` | Template for user pins when using `vars`/`varsfirst` mode. | Store with `--ss`/`--su`. See template examples below. |
 | `--pin-tpl-ast` | `STR` | Template for assistant pins when using `vars`/`varsfirst` mode. | Store with `--ss`/`--su`. See template examples below. |
-| `--pin-mode-sys` | `vars|concat|both` | How system pins are included in the system prompt. `vars` (default) exposes pins as Xslate vars only; `concat` auto-appends a concatenated system-pin block; `both` does both. | Example: `z --pin-sys "A" --pin-sys "B" --pin-mode-sys vars --system 'Base <: $pins_str :>'` |
-| `--pin-mode-user` | `vars|varsfirst|concat` | How user pins are processed. `concat` (default) uses traditional concatenation; `vars` processes template for each pin; `varsfirst` processes template once for first pin only. | Requires `--pin-tpl-user` for `vars`/`varsfirst` modes. |
-| `--pin-mode-ast` | `vars|varsfirst|concat` | How assistant pins are processed. Same options as user mode. | Requires `--pin-tpl-ast` for `vars`/`varsfirst` modes. |
+| `--pin-mode-sys` | `vars\|concat\|both` | How system pins are included in the system prompt. `vars` (default) exposes pins as Xslate vars only; `concat` auto-appends a concatenated system-pin block; `both` does both. | Example: `z --pin-sys "A" --pin-sys "B" --pin-mode-sys vars --system 'Base <: $pins_str :>'` |
+| `--pin-mode-user` | `vars\|varsfirst\|concat` | How user pins are processed. `concat` (default) uses traditional concatenation; `vars` processes template for each pin; `varsfirst` processes template once for first pin only. | Requires `--pin-tpl-user` for `vars`/`varsfirst` modes. |
+| `--pin-mode-ast` | `vars\|varsfirst\|concat` | How assistant pins are processed. Same options as user mode. | Requires `--pin-tpl-ast` for `vars`/`varsfirst` modes. |
 | `--help-pins` | — | Dump this file. | `z --help-pins` |
 
 **Pipes format (txt):**  

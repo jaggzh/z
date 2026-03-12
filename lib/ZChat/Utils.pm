@@ -370,7 +370,8 @@ sub pagerdone($p) {
 
 sub show_file_md($path) {
 	my ($cols, $rows) = chars;
-	$cols //= 79;
+	$cols //= 80;
+	$cols-=2;
 
     my @commands = (
         # "glow \Q$path\E --tui", # --tui doesn't honor -w width

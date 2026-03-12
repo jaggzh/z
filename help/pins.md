@@ -45,23 +45,23 @@ Below is everything you need: options (complete), quick recipes for common needs
 | `--pin-shim` | `STR` | Append a shim to **user/assistant** pinned messages when building the request (e.g., `<pin-shim/>`). | To **persist** the shim default, combine with `-S` (store user) or `--ss` (store session). |
 | `--pin-tpl-user` | `STR` | Template for user pins when using `vars`/`varsfirst` mode. | Store with `--ss`/`--su`. See template examples below. |
 | `--pin-tpl-ast` | `STR` | Template for assistant pins when using `vars`/`varsfirst` mode. | Store with `--ss`/`--su`. See template examples below. |
-| `--pin-mode-sys` | `vars\|concat\|both` | How system pins are included in the system prompt. `vars` (default) exposes pins as Xslate vars only; `concat` auto-appends a concatenated system-pin block; `both` does both. | Example: `z --pin-sys "A" --pin-sys "B" --pin-mode-sys vars --system 'Base <: $pins_str :>'` |
-| `--pin-mode-user` | `vars\|varsfirst\|concat` | How user pins are processed. `concat` (default) uses traditional concatenation; `vars` processes template for each pin; `varsfirst` processes template once for first pin only. | Requires `--pin-tpl-user` for `vars`/`varsfirst` modes. |
-| `--pin-mode-ast` | `vars\|varsfirst\|concat` | How assistant pins are processed. Same options as user mode. | Requires `--pin-tpl-ast` for `vars`/`varsfirst` modes. |
+| `--pin-mode-sys` | `concat|vars` | How system pins are included. `concat` (default): auto-appended after the rendered system prompt; pins also available as Xslate vars. `vars`: opt-out of auto-append — use this when you're placing `$pins_str` yourself in the template and don't want a duplicate block appended. | `z --pin-mode-sys vars --system 'Guidelines: <: $pins_str :>'` |
+| `--pin-mode-user` | `vars|varsfirst|concat` | How user pins are processed. `concat` (default) uses traditional concatenation; `vars` processes template for each pin; `varsfirst` processes template once for first pin only. | Requires `--pin-tpl-user` for `vars`/`varsfirst` modes. |
+| `--pin-mode-ast` | `vars|varsfirst|concat` | How assistant pins are processed. Same options as user mode. | Requires `--pin-tpl-ast` for `vars`/`varsfirst` modes. |
 | `--help-pins` | — | Dump this file. | `z --help-pins` |
 
-**Pipes format (txt):**  
-- Each non-empty, non-comment line is one item.  
-- `user|||assistant` creates two pins (paired).  
-- A single field line creates a user pin.  
-- Escapes supported in fields: `\|` for literal `|`, `\\` for `\`, `\n` for newline.  
+**Pipes format (txt):**
+- Each non-empty, non-comment line is one item.
+- `user|||assistant` creates two pins (paired).
+- A single field line creates a user pin.
+- Escapes supported in fields: `\|` for literal `|`, `\\` for `\`, `\n` for newline.
 - BOM/CRLF handled; lines starting with `#` ignored.
 
-**JSON format:**  
-- Array of objects. Two accepted shapes:  
-  1) `{ "role": "system|user|assistant", "content": "..." , "method": "concat|msg" }`  
-  2) `{ "user": "...", "assistant": "..." }` (paired example)  
-- Example:  
+**JSON format:**
+- Array of objects. Two accepted shapes:
+  1) `{ "role": "system|user|assistant", "content": "..." , "method": "concat|msg" }`
+  2) `{ "user": "...", "assistant": "..." }` (paired example)
+- Example:
   ```json
   [
     {"role":"system","content":"Be terse.","method":"concat"},
@@ -75,11 +75,9 @@ Below is everything you need: options (complete), quick recipes for common needs
 
 ### System Pin Modes
 
-**`--pin-mode-sys vars` (default)**: System pins are exposed as template variables (`$pins`, `$pins_str`) in your system prompt. No automatic concatenation.
+**`--pin-mode-sys concat` (default)**: System `method:concat` pins are automatically appended to your rendered system prompt. Template variables (`$pins`, `$pins_str`, `$pin_cnt`) are always available regardless of mode.
 
-**`--pin-mode-sys concat`**: System pins are automatically concatenated and appended to your system prompt.
-
-**`--pin-mode-sys both`**: Both template variables AND automatic concatenation.
+**`--pin-mode-sys vars`**: Opt-out of auto-append. Use this when you're placing `$pins_str` yourself inside a template and don't want a duplicate block appended after it. Pins still available as template vars.
 
 ### User/Assistant Pin Modes
 
@@ -94,7 +92,7 @@ Below is everything you need: options (complete), quick recipes for common needs
 When using template modes, these variables are available:
 
 - `$pins` - Array of all pin content for this role
-- `$pins_str` - All pins joined with newlines  
+- `$pins_str` - All pins joined with newlines
 - `$pin_cnt` - Total number of pins
 - `$pin_idx` - Index of current pin (0-based)
 
@@ -196,8 +194,8 @@ I have these example responses to guide me:
 **Limits** (`--pins-*-max`) are enforced **per role** before assembly (keep newest).
 **Shim** (`--pin-shim`) is appended to user/assistant **pinned** messages at build time (not to live turns).
 
-**Templating:** System prompts and pin templates support Xslate vars:  
-`$datenow_ymd`, `$datenow_iso`, `$datenow_local`, `$modelname`,  
+**Templating:** System prompts and pin templates support Xslate vars:
+`$datenow_ymd`, `$datenow_iso`, `$datenow_local`, `$modelname`,
 `$pins` (ARRAY of pins for this role), `$pins_str` (pins joined with `\n`), `$pin_cnt`, `$pin_idx`.
 
 ---
@@ -463,10 +461,9 @@ $z->pin("Updated content", role=>$pins->[0]{role}, method=>$pins->[0]{method});
 
 | Mode | User Pins | Assistant Pins | System Pins |
 |------|-----------|----------------|-------------|
-| `concat` | Traditional concatenation + shims | Traditional concatenation + shims | Auto-appended to system prompt |
-| `vars` | Template processed for each pin message | Template processed for each pin message | Available as template vars only |
+| `concat` (default) | Traditional concatenation | Traditional concatenation | Auto-appended; also available as template vars |
+| `vars` | Template processed for each pin message | Template processed for each pin message | Opt-out: NOT auto-appended; use `$pins_str` in your template |
 | `varsfirst` | Template processed once (first pin), others suppressed | Template processed once (first pin), others suppressed | N/A |
-| `both` | N/A | N/A | Template vars AND auto-append |
 
 **Key insight**: `varsfirst` is perfect for "one formatted reference section" from multiple data pins. `vars` is for per-pin processing with templates. `both`? I don't know what use this is.
 
@@ -486,7 +483,7 @@ $z->pin("Updated content", role=>$pins->[0]{role}, method=>$pins->[0]{method});
     - { role: assistant, method: msg,    content: "text...", timestamp: 1710000100 }
     - { role: user,      method: msg,    content: "text...", timestamp: 1710000200 }
   created: 1710000000
-  
+
   # Templates and modes in session.yaml
   pin_tpl_user: ": if $pin_idx == 0 { Reference: <: $pins_str :> : }"
   pin_mode_user: "varsfirst"

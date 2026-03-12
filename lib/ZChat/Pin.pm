@@ -38,9 +38,9 @@ sub add_pin($self, $content, $opts=undef) {
 
     $self->_load_pins();
 
-    # Set defaults
-    my $role = $opts->{role} || 'system';
+    my $role   = $opts->{role}   || 'system';
     my $method = $opts->{method} || 'concat';
+    my $id     = $opts->{id};       # optional name; undef means unnamed
 
     # Validate role
     unless ($role =~ /^(system|user|assistant)$/) {
@@ -54,18 +54,38 @@ sub add_pin($self, $content, $opts=undef) {
         $method = 'concat';
     }
 
-    # Create pin object
     my $pin = {
-        content => $content,
-        role => $role,
-        method => $method,
+        content   => $content,
+        role      => $role,
+        method    => $method,
         timestamp => time(),
+        (defined $id ? (id => $id) : ()),
     };
 
     push @{$self->{pins}}, $pin;
 
     # Save to storage
     return $self->_save_pins();
+}
+
+# Resolve a pin identifier (name string or numeric index) to a numeric index.
+# Returns undef if not found.
+sub _resolve_pin_index {
+    my ($self, $ident) = @_;
+    return undef unless defined $ident;
+
+    # Numeric index
+    if ($ident =~ /^-?\d+$/) {
+        my $idx = $ident < 0 ? @{$self->{pins}} + $ident : $ident;
+        return undef if $idx < 0 || $idx >= @{$self->{pins}};
+        return $idx;
+    }
+
+    # Named id — return first match
+    for my $i (0 .. $#{$self->{pins}}) {
+        return $i if (($self->{pins}[$i]{id} // '') eq $ident);
+    }
+    return undef;
 }
 
 sub list_pins {
@@ -97,59 +117,44 @@ sub clear_pins_by_role {
 }
 
 sub remove_pin {
-    my ($self, $index) = @_;
-
-    return 0 unless defined $index;
-
+    my ($self, $ident) = @_;
+    return 0 unless defined $ident;
     $self->_load_pins();
-
-    # Validate index
-    return 0 if $index < 0 || $index >= @{$self->{pins}};
-
+    my $index = $self->_resolve_pin_index($ident);
+    return 0 unless defined $index;
     splice @{$self->{pins}}, $index, 1;
-
     return $self->_save_pins();
 }
 
 sub update_pin {
-    my ($self, $index, $new_content, %opts) = @_;
-    
-    return 0 unless defined $index && defined $new_content;
-    
+    my ($self, $ident, $new_content, %opts) = @_;
+    return 0 unless defined $ident && defined $new_content;
     $self->_load_pins();
-    
-    # Handle negative indices
-    $index = @{$self->{pins}} + $index if $index < 0;
-    
-    # Validate index
-    return 0 if $index < 0 || $index >= @{$self->{pins}};
-    
-    # Update content and timestamp, preserve other fields
-    $self->{pins}[$index]{content} = $new_content;
+    my $index = $self->_resolve_pin_index($ident);
+    return 0 unless defined $index;
+    $self->{pins}[$index]{content}   = $new_content;
     $self->{pins}[$index]{timestamp} = time();
-    
-    # Allow role/method updates if specified
-    $self->{pins}[$index]{role} = $opts{role} if defined $opts{role};
+    $self->{pins}[$index]{role}   = $opts{role}   if defined $opts{role};
     $self->{pins}[$index]{method} = $opts{method} if defined $opts{method};
-    
+    $self->{pins}[$index]{id}     = $opts{id}     if defined $opts{id};
     return $self->_save_pins();
 }
 
 sub validate_pin_indices {
     my ($self, @indices) = @_;
-    
+
     $self->_load_pins();
     my $pin_count = @{$self->{pins}};
-    
+
     for my $index (@indices) {
         # Handle negative indices
         my $actual_index = $index < 0 ? $pin_count + $index : $index;
-        
+
         if ($actual_index < 0 || $actual_index >= $pin_count) {
             return (0, "Pin index $index is out of range (have $pin_count pins)");
         }
     }
-    
+
     return (1, "All indices valid");
 }
 
@@ -225,99 +230,87 @@ sub build_message_array {
 }
 
 sub _process_role_pins {
-    my ($self, $messages, $role, $mode, $shims, $template) = @_;
+    my ($self, $messages, $role, $mode, $mates, $template) = @_;
 
-    # Find messages for this role
-    my @role_messages = grep { $_->{is_pinned} && $_->{role} eq $role } @$messages;
+    # System pins always belong in the system string (_get_system_content handles
+    # all modes for system). Never leave them as messages in the array.
+    if ($role eq 'system') {
+        @$messages = grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages;
+        return;
+    }
+
+    # Find concat-method pinned messages for this role.
+    # msg-method pins are individual messages and pass through unchanged.
+    my @role_messages = grep { $_->{is_pinned} && $_->{role} eq $role && ($_->{method}//'') eq 'concat' } @$messages;
     return unless @role_messages;
 
     if ($mode eq 'vars' || $mode eq 'varsfirst') {
-        # Get all pins for this role for template variables
-        my @role_pins = map { $_->{content} } grep { $_->{role} eq $role } @{$self->{pins}};
+        # Template variables contain only concat-method pins for this role,
+        # keeping scope clean and avoiding bleed from other roles/methods.
+        my @role_pins = map { $_->{content} } @role_messages;
         my $pins_str = join("\n", @role_pins);
-        my $pin_cnt = scalar @role_pins;
+        my $pin_cnt  = scalar @role_pins;
 
-        # Determine which template to use
-        my $template_content = $template;
-
-        # Process each message with template variables
         for my $i (0..$#role_messages) {
             my $msg = $role_messages[$i];
-            my $pin_idx = $i;
 
-            # For varsfirst mode, only process first message
-            if ($mode eq 'varsfirst' && $pin_idx > 0) {
-                # Mark for removal instead of just clearing content
+            # varsfirst: process template once using first slot; suppress the rest
+            if ($mode eq 'varsfirst' && $i > 0) {
                 $msg->{_remove} = 1;
                 next;
             }
 
-            # Use template if provided, otherwise use message content
-            my $content = $template_content // $msg->{content};
+            my $content = $template // $msg->{content};
 
-            # Apply template processing if content contains template syntax
-            if ($template_content || $content =~ /<:|:\>|^\s*:/) {
-                my $template_vars = {
-                    pins => \@role_pins,
+            if ($template || $content =~ /<:|:\>|^\s*:/) {
+                $content = $self->_apply_template($content, {
+                    pins     => \@role_pins,
                     pins_str => $pins_str,
-                    pin_cnt => $pin_cnt,
-                    pin_idx => $pin_idx,
-                };
-                $content = $self->_apply_template($content, $template_vars);
+                    pin_cnt  => $pin_cnt,
+                    pin_idx  => $i,
+                    pin_last => ($i == $pin_cnt - 1) ? 1 : 0,
+                });
             }
 
             $msg->{content} = $content;
-
-            # NO shim for vars/varsfirst modes - shims only for concat mode
-        }
-    } elsif ($mode eq 'concat') {
-        # Traditional concatenation with shims
-        for my $msg (@role_messages) {
-            if ($role ne 'system' && $shims->{$role}) {
-                $msg->{content} .= "\n" . $shims->{$role};
-            }
         }
     }
-
-    # Handle system mode special cases
-    if ($role eq 'system' && $mode eq 'vars') {
-        # Remove system pinned messages (they'll be in template vars)
-        @$messages = grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages;
-    }
+    # concat mode: no suffix appending. Content is already concatenated by
+    # build_message_array(). Mate injection for alternation is handled
+    # solely by _ensure_alternating_roles().
 }
 
-sub build_message_array_with_shims($self, $shims, $optshro=undef) {
+sub build_message_array_with_mates($self, $mates, $optshro=undef) {
     $optshro ||= {};
-    $shims ||= {
-        user => '<pin-shim/>',
-        assistant => '<pin-shim/>',
-    };
+    # mates: { user => '...', assistant => '...' }
+    # These are the *full content* of auto-injected bridging messages when
+    # alternating-role constraints require a synthetic turn. They are NOT
+    # appended as suffixes to real pinned content.
+    $mates ||= {};
 
     my $messages = $self->build_message_array();
 
-    # Get pin modes and templates
-    my $sys_mode = $optshro->{sys_mode} // 'vars';
-    my $user_mode = $optshro->{user_mode} // 'concat';
-    my $ast_mode = $optshro->{ast_mode} // 'concat';
+    my $sys_mode      = $optshro->{sys_mode}      // 'vars';
+    my $user_mode     = $optshro->{user_mode}      // 'concat';
+    my $ast_mode      = $optshro->{ast_mode}       // 'concat';
     my $user_template = $optshro->{user_template};
-    my $ast_template = $optshro->{ast_template};
+    my $ast_template  = $optshro->{ast_template};
 
-    # Process each role's pins
-    $self->_process_role_pins($messages, 'system', $sys_mode, $shims, undef);
-    $self->_process_role_pins($messages, 'user', $user_mode, $shims, $user_template);
-    $self->_process_role_pins($messages, 'assistant', $ast_mode, $shims, $ast_template);
+    $self->_process_role_pins($messages, 'system',    $sys_mode,  $mates, undef);
+    $self->_process_role_pins($messages, 'user',      $user_mode, $mates, $user_template);
+    $self->_process_role_pins($messages, 'assistant', $ast_mode,  $mates, $ast_template);
 
-    # Remove messages marked for removal (from varsfirst mode)
+    # Remove messages suppressed by varsfirst
     @$messages = grep { !$_->{_remove} } @$messages;
 
-    # Ensure alternating roles by inserting shims where needed
-    $self->_ensure_alternating_roles($messages, $shims);
+    # Inject bridging messages where alternation is violated
+    $self->_ensure_alternating_roles($messages, $mates);
 
     return $messages;
 }
 
 sub _ensure_alternating_roles {
-    my ($self, $messages, $shims) = @_;
+    my ($self, $messages, $mates) = @_;
 
     return unless @$messages > 1;
 
@@ -325,27 +318,25 @@ sub _ensure_alternating_roles {
     my $last_role;
 
     for my $msg (@$messages) {
-        # Skip system messages for alternating logic
         if ($msg->{role} eq 'system' || $msg->{role} eq 'tool') {
             push @result, $msg;
             next;
         }
 
-        # If we have consecutive non-system messages of the same role, inject alternate
         if (defined $last_role && $last_role eq $msg->{role}) {
-            my $alternate_role = ($msg->{role} eq 'user') ? 'assistant' : 'user';
-            my $shim_content = $shims->{$alternate_role} // '<shim/>';
+            my $alt_role    = ($msg->{role} eq 'user') ? 'assistant' : 'user';
+            my $mate_content = $mates->{$alt_role} // '';
 
             push @result, {
-                role => $alternate_role,
-                content => $shim_content,
-                is_pinned => 1,
-                _injected_shim => 1,
+                role           => $alt_role,
+                content        => $mate_content,
+                is_pinned      => 1,
+                _injected_mate => 1,
             };
         }
 
         push @result, $msg;
-        $last_role = $msg->{role} unless $msg->{role} eq 'system';
+        $last_role = $msg->{role};
     }
 
     @$messages = @result;
@@ -378,6 +369,16 @@ sub get_system_pins {
     return \@sys;
 }
 
+# Returns content of system pins filtered by method (e.g. 'concat').
+sub get_system_pins_by_method {
+    my ($self, $method) = @_;
+    $self->_load_pins();
+    my @sys = map  { $_->{content} }
+              grep { $_->{role} eq 'system' && ($_->{method}//'') eq $method }
+              @{$self->{pins}};
+    return \@sys;
+}
+
 sub get_pins_summary {
     my ($self, $max_length) = @_;
     $max_length ||= 100;
@@ -398,10 +399,12 @@ sub get_pins_summary {
             $content = substr($content, 0, $max_length - 23) . '...';
         }
 
-        my $summary = sprintf("%d: [%s/%s] %s",
+        my $id_str  = defined $pin->{id} ? " [$pin->{id}]" : "";
+        my $summary = sprintf("%d: [%s/%s]%s %s",
             $i,
             $pin->{role},
             $pin->{method},
+            $id_str,
             $content
         );
 

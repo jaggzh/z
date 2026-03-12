@@ -57,13 +57,13 @@ sub load_effective_config($self, $cli_optshro=undef) {
     my $shell_config = $self->_load_shell_config();
     if ($shell_config) {
         %$config = (%$config, %$shell_config);
-        
+
         # Record source-specific copies for shell scope
         $config->{system_file_shell}    = $shell_config->{system_file}    if defined $shell_config->{system_file};
         $config->{system_string_shell}  = $shell_config->{system_string}  if defined $shell_config->{system_string};
         $config->{system_persona_shell} = $shell_config->{system_persona} if defined $shell_config->{system_persona};
         $config->{system_shell}         = $shell_config->{system}         if defined $shell_config->{system};
-        
+
         sel(2, "Loaded shell session config overrides");
     }
 
@@ -105,10 +105,11 @@ sub load_effective_config($self, $cli_optshro=undef) {
     if (defined $cli_optshro->{system}) { $config->{system} = $cli_optshro->{system}; $config->{_cli_system} = $cli_optshro->{system};
         sel(2, "Setting system from CLI options"); }
 
-    # Preserve pin_shims / pin_mode CLI handling
-    if (defined $cli_optshro->{pin_shims}) {
-        $config->{pin_shims} = $cli_optshro->{pin_shims};
-        sel(2, "Setting pin_shims from CLI options");
+    # Preserve pin_mates / pin_mode CLI handling
+    if (defined $cli_optshro->{pin_mate_user} || defined $cli_optshro->{pin_mate_ast}) {
+        $config->{pin_mate_user} = $cli_optshro->{pin_mate_user} if defined $cli_optshro->{pin_mate_user};
+        $config->{pin_mate_ast}  = $cli_optshro->{pin_mate_ast}  if defined $cli_optshro->{pin_mate_ast};
+        sel(2, "Setting pin_mate_user/ast from CLI options");
     }
     if (defined $cli_optshro->{pin_mode_sys}) {
         $config->{pin_mode_sys} = $cli_optshro->{pin_mode_sys};
@@ -122,7 +123,8 @@ sub load_effective_config($self, $cli_optshro=undef) {
         $config->{pin_mode_ast} = $cli_optshro->{pin_mode_ast};
         sel(2, "Setting pin_mode_ast '$cli_optshro->{pin_mode_ast}' from CLI options");
     }
-    $config->{_cli_pin_shims}     = $cli_optshro->{pin_shims}     if defined $cli_optshro->{pin_shims};
+    $config->{_cli_pin_mate_user} = $cli_optshro->{pin_mate_user} if defined $cli_optshro->{pin_mate_user};
+    $config->{_cli_pin_mate_ast}  = $cli_optshro->{pin_mate_ast}  if defined $cli_optshro->{pin_mate_ast};
     $config->{_cli_pin_mode_sys}  = $cli_optshro->{pin_mode_sys}  if defined $cli_optshro->{pin_mode_sys};
     $config->{_cli_pin_mode_user} = $cli_optshro->{pin_mode_user} if defined $cli_optshro->{pin_mode_user};
     $config->{_cli_pin_mode_ast}  = $cli_optshro->{pin_mode_ast}  if defined $cli_optshro->{pin_mode_ast};
@@ -164,14 +166,12 @@ sub _get_system_defaults {
             user => 50,
             assistant => 50,
         },
-        pin_shims => {
-            user => '<pin-shim/>',
-            assistant => '<pin-shim/>',
-        },
+        pin_mate_user => '',   # content for auto-injected user bridging messages
+        pin_mate_ast  => '',   # content for auto-injected assistant bridging messages
         pin_tpl_user => undef,
         pin_tpl_ast => undef,
-        pin_mode_sys => 'vars',      # vars|concat|both
-        pin_mode_user => 'concat',   # vars|varsfirst|concat  
+        pin_mode_sys => 'concat',    # vars|concat  (vars = opt-out: place $pins_str yourself)
+        pin_mode_user => 'concat',   # vars|varsfirst|concat
         pin_mode_ast => 'concat',    # vars|varsfirst|concat
     };
 }
@@ -217,7 +217,7 @@ sub store_user_config {
     my $user_config_file = File::Spec->catfile($config_dir, 'user.yaml');
 
     my $config_to_save;
-    
+
     if ($foptshro->{owrite}) {
         # Full overwrite mode - use exactly what was passed
         $config_to_save = { %$optshr };
@@ -227,13 +227,10 @@ sub store_user_config {
         my $existing = $self->_load_user_config() || {};
         $config_to_save = $existing;
 
-        for my $key (qw(session system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
+        for my $key (qw(session system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast pin_mate_user pin_mate_ast)) {
             if (defined $optshr->{$key}) {
                 $config_to_save->{$key} = $optshr->{$key};
             }
-        }
-        if (defined $optshr->{pin_shims}) {
-            $config_to_save->{pin_shims} = $optshr->{pin_shims};
         }
     }
 
@@ -251,7 +248,7 @@ sub store_session_config {
     my $session_config_file = File::Spec->catfile($session_dir, 'session.yaml');
 
     my $config_to_save;
-    
+
     if ($foptshro->{owrite}) {
         # Full overwrite mode - use exactly what was passed
         $config_to_save = { %$optshr };
@@ -267,15 +264,15 @@ sub store_session_config {
         $config_to_save->{created} = time() unless exists $config_to_save->{created};
 
         # If storing any system source, clear others in this scope
-        if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
+        if (defined $optshr->{system_string} || defined $optshr->{system_file} ||
             defined $optshr->{system_persona} || defined $optshr->{system}) {
-            
+
             # Clear all system sources in session config
             delete $config_to_save->{system_string};
-            delete $config_to_save->{system_file}; 
+            delete $config_to_save->{system_file};
             delete $config_to_save->{system_persona};
             delete $config_to_save->{system};
-            
+
             # Set the new one
             for my $key (qw(system_string system_file system_persona system)) {
                 $config_to_save->{$key} = $optshr->{$key} if defined $optshr->{$key};
@@ -283,7 +280,7 @@ sub store_session_config {
         }
 
         # Update with new values
-        for my $key (qw(system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast)) {
+        for my $key (qw(system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast pin_mate_user pin_mate_ast)) {
             if (defined $optshr->{$key}) {
                 if (($optshr->{$key} // '') eq '') {
                     sel 1, "Clearing $key in session config";
@@ -293,9 +290,6 @@ sub store_session_config {
                     sel 1, "Storing $key = $$optshr{$key} in session config";
                 }
             }
-        }
-        if (defined $optshr->{pin_shims}) {
-            $config_to_save->{pin_shims} = $optshr->{pin_shims};
         }
     }
 
@@ -349,14 +343,18 @@ sub get_pin_limits {
     return $self->{effective_config}->{pin_limits} || {};
 }
 
-sub get_pin_shims {
+sub get_pin_mates {
     my ($self) = @_;
-    return $self->{effective_config}->{pin_shims} || {};
+    my $cfg = $self->{effective_config};
+    return {
+        user      => ($cfg->{pin_mate_user} // ''),
+        assistant => ($cfg->{pin_mate_ast}  // ''),
+    };
 }
 
 sub get_pin_mode_sys {
     my ($self) = @_;
-    return $self->{effective_config}->{pin_mode_sys} || 'vars';
+    return $self->{effective_config}->{pin_mode_sys} || 'concat';
 }
 
 sub get_pin_mode_user {
@@ -459,9 +457,9 @@ sub resolve_system_prompt {
 
 sub _get_shell_session_id {
     my ($self) = @_;
-    
+
     return $self->{_shell_session_id} if defined $self->{_shell_session_id};
-    
+
     if (defined $self->{override_pproc}) {
         # User override - just use it directly
         $self->{_shell_session_id} = $self->{override_pproc};
@@ -469,13 +467,13 @@ sub _get_shell_session_id {
         # Use the robust cross-platform parent ID
         $self->{_shell_session_id} = get_parent_id();
     }
-    
+
     return $self->{_shell_session_id};
 }
 
 sub _get_shell_config_file {
     my ($self) = @_;
-    
+
     my $uid = $<;
     my $session_id = $self->_get_shell_session_id();
     my $filename = "/tmp/zchat-$uid-$session_id.yaml";
@@ -484,7 +482,7 @@ sub _get_shell_config_file {
 
 sub _load_shell_config {
     my ($self) = @_;
-    
+
     my $shell_config_file = $self->_get_shell_config_file();
     sel 2, "Checking shell config: $shell_config_file";
     my @stat = stat($shell_config_file);
@@ -503,7 +501,7 @@ sub _load_shell_config {
 sub store_shell_config {
     my ($self, $optshr, $foptshro) = @_;
     $foptshro ||= {};
-    
+
     my $shell_config_file = $self->_get_shell_config_file();
 
     # Errors out on failure to create but not if exists. Validates ownership.
@@ -519,27 +517,27 @@ sub store_shell_config {
         # Merge mode (current behavior)
         my $existing = $self->_load_shell_config() || {};
         $config_to_save = $existing;
-        
+
         # Store session name
         $config_to_save->{session} = $optshr->{session} if defined $optshr->{session};
-        
+
         # If storing any system source, clear others in this scope
-        if (defined $optshr->{system_string} || defined $optshr->{system_file} || 
+        if (defined $optshr->{system_string} || defined $optshr->{system_file} ||
             defined $optshr->{system_persona} || defined $optshr->{system}) {
-            
+
             # Clear all system sources in shell config
             delete $config_to_save->{system_string};
-            delete $config_to_save->{system_file}; 
+            delete $config_to_save->{system_file};
             delete $config_to_save->{system_persona};
             delete $config_to_save->{system};
-            
+
             # Set the new one
             for my $key (qw(system_string system_file system_persona system)) {
                 $config_to_save->{$key} = $optshr->{$key} if defined $optshr->{$key};
             }
         }
     }
-    
+
     sel 1, "Saving shell session config: $shell_config_file";
     return $self->{storage}->save_yaml($shell_config_file, $config_to_save);
 }
@@ -548,38 +546,38 @@ sub store_shell_config {
 
 sub get_status_info {
     my ($self) = @_;
-    
+
     my $cfg = $self->{effective_config};
     my $info = {
         precedence => {},
         sources => {},
         file_locations => {},
     };
-    
+
     # Build precedence chain for system prompt
     $info->{precedence}{system_prompt} = $self->_build_system_prompt_precedence($cfg);
     $info->{precedence}{session} = $self->_build_session_precedence($cfg);
-    
+
     # Build sources view
     $info->{sources} = $self->_build_sources_view($cfg);
-    
+
     # File locations
     $info->{file_locations} = $self->_get_file_locations();
-    
+
     return $info;
 }
 
 sub _build_system_prompt_precedence {
     my ($self, $cfg) = @_;
-    
+
     my @chain;
     my $active_found = 0;
-    
+
     # CLI level (highest precedence)
     if (defined $cfg->{_cli_system_file}) {
         push @chain, {
             source => 'CLI',
-            type => 'system_file', 
+            type => 'system_file',
             value => $cfg->{_cli_system_file},
             active => !$active_found,
             location => 'command line'
@@ -590,7 +588,7 @@ sub _build_system_prompt_precedence {
         push @chain, {
             source => 'CLI',
             type => 'system_string',
-            value => $cfg->{_cli_system_string}, 
+            value => $cfg->{_cli_system_string},
             active => !$active_found,
             location => 'command line'
         };
@@ -601,7 +599,7 @@ sub _build_system_prompt_precedence {
             source => 'CLI',
             type => 'system_persona',
             value => $cfg->{_cli_system_persona},
-            active => !$active_found, 
+            active => !$active_found,
             location => 'command line'
         };
         $active_found = 1;
@@ -612,11 +610,11 @@ sub _build_system_prompt_precedence {
             type => 'system',
             value => $cfg->{_cli_system},
             active => !$active_found,
-            location => 'command line' 
+            location => 'command line'
         };
         $active_found = 1;
     }
-    
+
     # Shell level (new - between CLI and SESSION)
     for my $field (qw(system_file_shell system_string_shell system_persona_shell system_shell)) {
         next unless defined $cfg->{$field};
@@ -630,7 +628,7 @@ sub _build_system_prompt_precedence {
         };
         $active_found = 1;
     }
-    
+
     # Session level
     for my $field (qw(system_file_session system_string_session system_persona_session system_session)) {
         next unless defined $cfg->{$field};
@@ -644,30 +642,30 @@ sub _build_system_prompt_precedence {
         };
         $active_found = 1;
     }
-    
-    # User level  
+
+    # User level
     for my $field (qw(system_file_user system_string_user system_persona_user system_user)) {
         next unless defined $cfg->{$field};
         my ($type) = $field =~ /^(.+)_user$/;
         push @chain, {
             source => 'USER',
-            type => $type, 
+            type => $type,
             value => $cfg->{$field},
             active => !$active_found,
             location => $self->_get_user_config_path()
         };
         $active_found = 1;
     }
-    
+
     return \@chain;
 }
 
 sub _build_session_precedence {
     my ($self, $cfg) = @_;
-    
+
     my @chain;
     my $active_found = 0;
-    
+
     # CLI session
     if (defined $cfg->{_cli_session}) {
         push @chain, {
@@ -679,8 +677,8 @@ sub _build_session_precedence {
         };
         $active_found = 1;
     }
-    
-    # SHELL (shell session)  
+
+    # SHELL (shell session)
     my $shell_config = $self->_load_shell_config();
     if ($shell_config && $shell_config->{session}) {
         push @chain, {
@@ -692,12 +690,12 @@ sub _build_session_precedence {
         };
         $active_found = 1;
     }
-    
+
     # User session
     my $user_config = $self->_load_user_config();
     if ($user_config && $user_config->{session}) {
         push @chain, {
-            source => 'USER', 
+            source => 'USER',
             type => 'session',
             value => $user_config->{session},
             active => !$active_found,
@@ -705,24 +703,24 @@ sub _build_session_precedence {
         };
         $active_found = 1;
     }
-    
+
     # System default
     push @chain, {
         source => 'SYSTEM',
-        type => 'session', 
+        type => 'session',
         value => 'default',
         active => !$active_found,
         location => 'system defaults'
     };
-    
+
     return \@chain;
 }
 
 sub _build_sources_view {
     my ($self, $cfg) = @_;
-    
+
     my $sources = {};
-    
+
     # CLI sources
     my $cli = {};
     $cli->{system_string} = $cfg->{_cli_system_string} if defined $cfg->{_cli_system_string};
@@ -731,7 +729,7 @@ sub _build_sources_view {
     $cli->{system} = $cfg->{_cli_system} if defined $cfg->{_cli_system};
     $cli->{session} = $cfg->{_cli_session} if defined $cfg->{_cli_session};
     $sources->{CLI} = $cli if keys %$cli;
-    
+
     # Shell sources
     my $shell_config = $self->_load_shell_config();
     if ($shell_config && keys %$shell_config) {
@@ -741,7 +739,7 @@ sub _build_sources_view {
         }
         $sources->{SHELL} = $filtered if keys %$filtered;
     }
-    
+
     # Session sources
     my $session_config = $self->_load_session_config();
     if ($session_config && keys %$session_config) {
@@ -751,8 +749,8 @@ sub _build_sources_view {
         }
         $sources->{SESSION} = $filtered if keys %$filtered;
     }
-    
-    # User sources  
+
+    # User sources
     my $user_config = $self->_load_user_config();
     if ($user_config && keys %$user_config) {
         my $filtered = {};
@@ -761,20 +759,20 @@ sub _build_sources_view {
         }
         $sources->{USER} = $filtered if keys %$filtered;
     }
-    
+
     # System defaults
     my $defaults = $self->_get_system_defaults();
     $sources->{SYSTEM} = { session => $defaults->{session} };
-    
+
     return $sources;
 }
 
 sub _get_file_locations {
     my ($self) = @_;
-    
+
     return {
         SESSION => $self->_get_session_config_path(),
-        USER => $self->_get_user_config_path(), 
+        USER => $self->_get_user_config_path(),
         SHELL => $self->_get_shell_config_file(),
         SYSTEM => 'built-in defaults'
     };
@@ -793,45 +791,45 @@ sub _get_user_config_path {
     return File::Spec->catfile($config_dir, 'user.yaml');
 }
 
-# Add this method to ZChat 
+# Add this method to ZChat
 
 sub show_status {
     my ($self, $verbose_level) = @_;
     $verbose_level //= 0;
-    
+
     my $def_abbr_sysstr = 30;
-    
+
     my $status_info = $self->{config}->get_status_info();
-    
+
     say "${a_stat_actline}* Precedence:$rst";
-    
+
     # System prompt precedence
     say "  - System prompt";
     my $indent = "   ";
     for my $item (@{$status_info->{precedence}{system_prompt}}) {
         my $active_marker = $item->{active} ? "${a_stat_acttag}[active]$rst" : "${a_stat_undeftag}[unused]$rst";
         my $value = $item->{value};
-        
+
         # Truncate system strings unless -vv
         if ($item->{type} eq 'system_string' && $verbose_level < 2) {
             $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
         }
-        
+
         if ($item->{active}) {
             say "${indent}<- $item->{source}($item->{type}) = \"${a_stat_actval}${value}$rst\" $active_marker";
         } else {
-            say "${indent} <- $item->{source}($item->{type}) = '$value' $active_marker";  
+            say "${indent} <- $item->{source}($item->{type}) = '$value' $active_marker";
         }
         say "${indent}    Loc: $item->{location}" if $item->{location} ne 'command line';
         $indent .= " ";
     }
-    
+
     # Session precedence
     say "  - Session";
     $indent = "   ";
     for my $item (@{$status_info->{precedence}{session}}) {
         my $active_marker = $item->{active} ? "${a_stat_acttag}[active]$rst" : "${a_stat_undeftag}[unused]$rst";
-        
+
         if ($item->{active}) {
             say "${indent}<- $item->{source} = \"${a_stat_actval}$item->{value}$rst\" $active_marker";
         } else {
@@ -840,29 +838,29 @@ sub show_status {
         say "${indent}    Loc: $item->{location}" if $item->{location} ne 'command line' && $item->{location} ne 'system defaults';
         $indent .= " ";
     }
-    
+
     say "${a_stat_actline}* Sources:$rst";
-    
+
     # Sources view
     for my $source_name (qw(CLI SHELL SESSION USER SYSTEM)) {
         my $source_data = $status_info->{sources}{$source_name};
         next unless $source_data && keys %$source_data;
-        
+
         my $location = $status_info->{file_locations}{$source_name} || '';
         say "  - $source_name" . ($location ? ": $location" : "");
-        
+
         for my $key (sort keys %$source_data) {
             my $value = $source_data->{$key};
-            
+
             # Truncate system strings unless -vv
             if ($key eq 'system_string' && $verbose_level < 2) {
                 $value = substr($value, 0, $def_abbr_sysstr) . ".." if length($value) > $def_abbr_sysstr;
             }
-            
+
             # Determine if this setting is actually being used
             my $is_used = $self->_is_setting_used($source_name, $key, $status_info);
             my $usage_tag = $is_used ? "${a_stat_acttag}[used]$rst" : "${a_stat_undeftag}[unused]$rst";
-            
+
             say "    $key: '$value' $usage_tag";
         }
     }
@@ -870,7 +868,7 @@ sub show_status {
 
 sub _is_setting_used {
     my ($self, $source_name, $key, $status_info) = @_;
-    
+
     # Check if this source/key combination is the active one in precedence
     for my $category (values %{$status_info->{precedence}}) {
         for my $item (@$category) {
@@ -890,7 +888,7 @@ sub get_user_config_path {
 sub get_session_dir {
     my ($session_name) = @_;
     return undef unless $session_name;
-    
+
     my $home = $ENV{HOME} || die "HOME environment variable not set";
     my $config_dir = File::Spec->catdir($home, '.config', 'zchat');
     my @session_parts = split('/', $session_name);

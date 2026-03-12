@@ -41,7 +41,7 @@ sub new {
         system_prompt=> $opts{system_prompt},
         system_file  => $opts{system_file},
         system_string=> $opts{system_string},
-        pin_shims    => $opts{pin_shims},
+        pin_mates    => $opts{pin_mates},
         override_pproc=> $opts{override_pproc},
         backend      => $opts{backend},
         model        => $opts{model},
@@ -487,34 +487,38 @@ sub _get_system_content {
 
     # Render Xslate variables if present
     if ($content) {
-        # Collect system pins as template vars
-        my $sys_pins_ar = $self->{pin_mgr}->get_system_pins();
-        my $pins_str    = join("\n", @$sys_pins_ar);
-        my $tpl = Text::Xslate->new(type=>'text', verbose=>0);
-        my $modelname =
-			( $self->{core}->get_model_info() // {} )->{name} // 'unknown-model';
+        my $all_sys_pins = $self->{pin_mgr}->get_system_pins();   # all system pins for template vars
+        my $concat_pins  = $self->{pin_mgr}->get_system_pins_by_method('concat');
+
+        my $pins_str = join("\n", @$all_sys_pins);
+        my $tpl      = Text::Xslate->new(type=>'text', verbose=>0);
+        my $modelname = ( $self->{core}->get_model_info() // {} )->{name} // 'unknown-model';
         my $now = time;
-        my $pin_cnt = $self->{pin_mgr}->get_pin_count("system");
+        my $pin_cnt = scalar @$all_sys_pins;
+
+        # Template vars are always available regardless of pin_mode_sys
         my $vars = {
             datenow_ymd   => POSIX::strftime("%Y-%m-%d", localtime($now)),
             datenow_iso   => POSIX::strftime("%Y-%m-%dT%H:%M:%S%z", localtime($now)),
             datenow_local => scalar localtime($now),
             modelname     => $modelname,
-            pins          => $sys_pins_ar,   # array of system pin strings
-            pins_str      => $pins_str,      # "\n" joined system pins
+            pins          => $all_sys_pins,
+            pins_str      => $pins_str,
             pin_cnt       => $pin_cnt,
         };
         $content = $tpl->render_string($content, $vars);
 
-		# Apply pin mode concatenation if needed
-		my $pin_mode_sys = $self->{config}->get_pin_mode_sys() // 'vars';
-		$DB::single=1;
-		if (($pin_mode_sys eq 'concat' || $pin_mode_sys eq 'both') && @$sys_pins_ar) {
-			my $pins_block = join("\n", @$sys_pins_ar);
-			$content .= "\n\n" . $pins_block;
-			sel(2, "Appended " . scalar(@$sys_pins_ar) . " system pins (mode: $pin_mode_sys)");
-		}
-	}
+        # Auto-append concat-method pins unless pin_mode_sys=vars (explicit opt-out:
+        # use vars only when you're placing $pins_str yourself in the template).
+        my $pin_mode_sys = $self->{config}->get_pin_mode_sys() // 'concat';
+        if ($pin_mode_sys ne 'vars') {
+            if (@$concat_pins) {
+                my $pins_block = join("\n", @$concat_pins);
+                $content .= "\n" . $pins_block;
+                sel(2, "Appended " . scalar(@$concat_pins) . " system concat-pins");
+            }
+        }
+    }
 
     sel(2, "Final system content length: " . length($content)) if defined $content;
     return $content;
@@ -754,30 +758,30 @@ sub query($self, $user_text, $optshro=undef) {
                 session_name => $self->get_session_name()
             );
         }
-        
+
         for my $id (@{$optshro->{media_ids}}) {
             my $media = $self->{media_mgr}->get_media_by_id($id);
             unless ($media) {
                 swarn "Media ID not found: $id";
                 next;
             }
-            
+
             my $full_path = $self->{media_mgr}->get_media_full_path($id);
             unless ($full_path && (-f $full_path || -l $full_path)) {
                 swarn "Media file not accessible: $full_path";
                 next;
             }
-            
+
             my $content = read_binary($full_path);
             my $base64 = encode_base64($content, '');
-            
+
             push @media_items, {
                 id => $id,
                 type => $media->{type_major},
                 mime_type => $media->{mime_type},
                 data => $base64,
             };
-            
+
             sel 2, "Loaded media: $id ($$media{type_major}, $$media{mime_type})";
         }
     }
@@ -806,16 +810,16 @@ sub query($self, $user_text, $optshro=undef) {
     );
 
     # Build messages using the complete template functionality
-    my $shims = $self->{config}->get_pin_shims();
-    my $pins_msgs = $self->{pin_mgr}->build_message_array_with_shims(
-        $shims,
-    	{
-    		sys_mode => ($self->{config}->get_pin_mode_sys() // 'vars'),
-    		user_mode => ($self->{config}->get_pin_mode_user() // 'concat'),
-    		ast_mode => ($self->{config}->get_pin_mode_ast() // 'concat'),
-    		user_template => $self->{config}->get_pin_tpl_user(),
-    		ast_template => $self->{config}->get_pin_tpl_ast(),
-    	},
+    my $mates    = $self->{config}->get_pin_mates();
+    my $pins_msgs = $self->{pin_mgr}->build_message_array_with_mates(
+        $mates,
+        {
+            sys_mode      => ($self->{config}->get_pin_mode_sys()  // 'concat'),
+            user_mode     => ($self->{config}->get_pin_mode_user() // 'concat'),
+            ast_mode      => ($self->{config}->get_pin_mode_ast()  // 'concat'),
+            user_template => $self->{config}->get_pin_tpl_user(),
+            ast_template  => $self->{config}->get_pin_tpl_ast(),
+        },
     );
 
     my @context   = @{ $self->{history}->messages() // [] };
@@ -927,7 +931,7 @@ sub query($self, $user_text, $optshro=undef) {
             request_time => $response_metadata->{request_time} || time,
         };
         $user_meta->{media_ids} = $optshro->{media_ids} if $optshro->{media_ids};
-        
+
         $self->{history}->append('user', $user_text, $user_meta);
     }
 

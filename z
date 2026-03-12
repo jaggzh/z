@@ -152,8 +152,8 @@ my ($opt, $usage) = describe_options(
     [ 'no-history|H',       "Do not use history (no load, no store)" ],
     [ 'input-only|I',       "Use history BUT do not write to it" ],
     [ 'dump-history|dump|dh', "Dump chat history (user, tool, assistant roles only)" ],
-    [ 'dump-text|text|dt',       "Dump chat history (like User:...)" ],
-    [ 'dump-sys',           "Dump rendered system prompt and exit" ],
+    [ 'dump-text|text|dt',    "Dump chat history (like User:...)" ],
+    [ 'dump-sys|dsys',         "Dump rendered system prompt and exit" ],
     [ 'edit-hist|eh|E',     "Edit history in $editor" ],
     [ 'owrite-last=s',      "Overwrite last history message for role (u|user|a|assistant) with current prompt" ],
     [ 'conv-last|cl=s',     "Write last message content: '-' => stdout, '-PATH' or 'PATH' => write to file" ],
@@ -171,10 +171,10 @@ my ($opt, $usage) = describe_options(
     [ 'clipboard|cb',       "Use clipboard content as Query. (Needs to be re-integrated. Not currently working." ],
     [ 'image|img=s',      "Copy image to session: path or <name>path",
         { callbacks => { img => sub { push @media, {type=>'image', path=>$_[0], external=>0} } } } ],
-    [ 'image-ext|img-ext|iext=s', "Reference external image: path or <name>path",  
+    [ 'image-ext|img-ext|iext=s', "Reference external image: path or <name>path",
         { callbacks => { iext => sub { push @media, {type=>'image', path=>$_[0], external=>1} } } } ],
     [ 'image-alias|img-alias|ialias=s', "Assign/change image name: <n>path or <new><old>" ],
-    
+
     [ 'audio=s',          "Copy audio to session: path or <name>path",
         { callbacks => { audio => sub { push @media, {type=>'audio', path=>$_[0], external=>0} } } } ],
     [ 'audio-ext|au-ext|aext=s', "Reference external audio: path or <name>path",
@@ -199,12 +199,14 @@ my ($opt, $usage) = describe_options(
     [ 'pin-sys=s@',         "Add system pin(s)" ],
     [ 'pin-user=s@',        "Add user pin(s)" ],
     [ 'pin-ast=s@',         "Add assistant pin(s) (shorthand: ast)" ],
-    [ 'pin-ua-pipe=s@',     "Add paired user|||assistant pin(s)" ],
-    [ 'pin-ua-json=s@',     "Add paired pins from JSON object(s) with {user,assistant}" ],
+    [ 'pin-id=s',           "Name/id for the next pin add, write, or rm operation" ],
+    [ 'pin-ua-pipe=s@',     "Add paired user|||assistant pin(s). 3-field: id|||user|||assistant" ],
+    [ 'pin-ua-json=s@',     "Add paired pins from JSON object(s) with {user,assistant,id}" ],
     [ 'pins-clear-user',    "Clear user pins only" ],
     [ 'pins-clear-ast',     "Clear assistant pins only" ],
     [ 'pins-clear-sys',     "Clear system pins only" ],
-    [ 'pin-shim=s',         "Set shim appended to user/assistant pinned messages" ],
+    [ 'pin-shim-user=s',     "Default content for auto-injected user bridging messages (mate)" ],
+    [ 'pin-shim-ast=s',      "Default content for auto-injected assistant bridging messages (mate)" ],
     [ 'pin-tpl-user=s',     "Template for user pins when using vars/varsfirst mode" ],
     [ 'pin-tpl-ast=s',      "Template for assistant pins when using vars/varsfirst mode" ],
     [ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: vars)" ],
@@ -556,7 +558,8 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     $store_opts{system}         = $opt->system         if defined $opt->system;
 
     # Pin options
-    $store_opts{pin_shims}      = { user=>$opt->pin_shim, assistant=>$opt->pin_shim } if defined $opt->pin_shim;
+    $store_opts{pin_mate_user} = $opt->pin_shim_user if defined $opt->pin_shim_user;
+    $store_opts{pin_mate_ast}  = $opt->pin_shim_ast  if defined $opt->pin_shim_ast;
     $store_opts{pin_tpl_user}   = $opt->pin_tpl_user   if defined $opt->pin_tpl_user;
     $store_opts{pin_tpl_ast}    = $opt->pin_tpl_ast    if defined $opt->pin_tpl_ast;
     $store_opts{pin_mode_sys}   = $opt->pin_mode_sys   if defined $opt->pin_mode_sys;
@@ -762,7 +765,7 @@ if (@media || $opt->image_alias || $opt->audio_alias) {
         storage => $zchat->{storage},
         session_name => $zchat->get_session_name()
     );
-    
+
     # Handle aliases first
     if ($opt->image_alias) {
         for my $spec (@{$opt->image_alias}) {
@@ -778,7 +781,7 @@ if (@media || $opt->image_alias || $opt->audio_alias) {
         }
         $non_query_acts++;
     }
-    
+
     # Add media files
     for my $m (@media) {
         # Parse name from path
@@ -788,7 +791,7 @@ if (@media || $opt->image_alias || $opt->audio_alias) {
         } else {
             $path = $m->{path};
         }
-        
+
         my $id;
         eval {
             if ($m->{type} eq 'image') {
@@ -807,7 +810,7 @@ if (@media || $opt->image_alias || $opt->audio_alias) {
             serr "Failed to add $m->{type}: $@";
             exit 1;
         }
-        
+
         push @media_ids, $id if defined $id;
     }
 }
@@ -820,9 +823,9 @@ if ($opt->media) {
             session_name => $zchat->get_session_name()
         );
     }
-    
+
     my $list = $zchat->{media_mgr}->list_media();
-    
+
     if (@$list) {
         for my $m (@$list) {
             my $name_str = defined $m->{name} ? " [$m->{name}]" : "";
@@ -995,9 +998,10 @@ if ($opt->pins_file) {
 }
 
 # Direct role-specific pins
+my $pin_id = $opt->pin_id;  # optional name for this batch of pins
 my $new_pin_track=0;
 for my $s (@{ $opt->pin_sys  // [] }) {
-    $zchat->pin($s, { role=>'system', method=>'concat' } );
+    $zchat->pin($s, { role=>'system', method=>'concat', ($pin_id ? (id=>$pin_id) : ()) } );
     $new_pin_track++;
     $non_query_acts++;
 }
@@ -1005,7 +1009,7 @@ sel 1, "--pin-sys: Added $new_pin_track system pins (concat mode)" if $new_pin_t
 
 $new_pin_track=0;
 for my $s (@{ $opt->pin_user // [] }) {
-    $zchat->pin($s, { role=>'user',   method=>'msg' } );
+    $zchat->pin($s, { role=>'user',   method=>'msg', ($pin_id ? (id=>$pin_id) : ()) } );
     $new_pin_track++;
     $non_query_acts++;
 }
@@ -1013,43 +1017,53 @@ sel 1, "--pin-user: Added $new_pin_track user pins (msg mode)" if $new_pin_track
 
 $new_pin_track=0;
 for my $s (@{ $opt->pin_ast  // [] }) {
-    $zchat->pin($s, { role=>'assistant', method=>'msg' } );
+    $zchat->pin($s, { role=>'assistant', method=>'msg', ($pin_id ? (id=>$pin_id) : ()) } );
     $new_pin_track++;
     $non_query_acts++;
 }
 sel 1, "--pin-ast: Added $new_pin_track assistant pins (msg mode)" if $new_pin_track;
 
-# UA pipe: "user|||assistant"
+# UA pipe: "user|||assistant" or "id|||user|||assistant"
 $new_pin_track=0;
 for my $pair (@{ $opt->pin_ua_pipe // [] }) {
-    my $new_pin_cnt=0;
-    my ($u,$a) = split(/\|\|\|/, $pair, 2);
-    $u = '' unless defined $u; $a = '' unless defined $a;
+    my @parts = split(/\|\|\|/, $pair, 3);
+    my ($pair_id, $u, $a);
+    if (@parts == 3) {
+        ($pair_id, $u, $a) = @parts;
+    } elsif (@parts == 2) {
+        ($u, $a) = @parts;
+        $pair_id = $pin_id;
+    } else {
+        ($u) = @parts;
+        $pair_id = $pin_id;
+    }
+    $u //= ''; $a //= '';
     if (length $u) {
-        $zchat->pin($u, { role=>'user', method=>'msg' });
+        $zchat->pin($u, { role=>'user', method=>'msg', ($pair_id ? (id=>$pair_id) : ()) });
         $new_pin_track++;
-        sel 2, "--pin-ua-pipe: Adding user pin (msg mode)";
+        sel 2, "--pin-ua-pipe: Adding user pin (msg mode)" . ($pair_id ? " id=$pair_id" : "");
     }
     if (length $a) {
-        $zchat->pin($a, { role=>'assistant', method=>'msg' });
+        $zchat->pin($a, { role=>'assistant', method=>'msg', ($pair_id ? (id=>$pair_id) : ()) });
         $new_pin_track++;
-        sel 2, "--pin-ua-pipe: Adding assistant pin (msg mode)";
+        sel 2, "--pin-ua-pipe: Adding assistant pin (msg mode)" . ($pair_id ? " id=$pair_id" : "");
     }
     $non_query_acts++;
 }
 sel 1, "--pin-ua-pipe: Added $new_pin_track user/assistant pins." if $new_pin_track;
 
-# UA JSON: {"user":"...","assistant":"..."}
+# UA JSON: {"user":"...","assistant":"...","id":"..."}
 $new_pin_track=0;
 for my $json (@{ $opt->pin_ua_json // [] }) {
     my $obj = eval { JSON::XS->new->decode($json) } // {};
     if (ref($obj) eq 'HASH') {
+        my $obj_id = $obj->{id} // $pin_id;
         if (defined $obj->{user} && $obj->{user} ne '') {
-            $zchat->pin($obj->{user}, { role=>'user', method=>'msg' });
+            $zchat->pin($obj->{user}, { role=>'user', method=>'msg', ($obj_id ? (id=>$obj_id) : ()) });
             $new_pin_track++;
         }
         if (defined $obj->{assistant} && $obj->{assistant} ne '') {
-            $zchat->pin($obj->{assistant}, { role=>'assistant', method=>'msg' });
+            $zchat->pin($obj->{assistant}, { role=>'assistant', method=>'msg', ($obj_id ? (id=>$obj_id) : ()) });
             $new_pin_track++;
         }
     } else {
@@ -1058,7 +1072,7 @@ for my $json (@{ $opt->pin_ua_json // [] }) {
     $non_query_acts++;
 }
 sel 1, "--pin-ua-json: Added $new_pin_track user/assistant pins." if $new_pin_track;
-$new_pin_track=0; # No more using it but reset for safety
+$new_pin_track=0;
 
 
 if ($opt->dump_history || $opt->dump_text) {

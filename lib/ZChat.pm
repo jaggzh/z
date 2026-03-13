@@ -511,7 +511,7 @@ sub _get_system_content {
         # Auto-append concat-method pins unless pin_mode_sys=vars (explicit opt-out:
         # use vars only when you're placing $pins_str yourself in the template).
         my $pin_mode_sys = $self->{config}->get_pin_mode_sys() // 'concat';
-        if ($pin_mode_sys ne 'vars') {
+        unless ($pin_mode_sys eq 'vars') {
             if (@$concat_pins) {
                 my $pins_block = join("\n", @$concat_pins);
                 $content .= "\n" . $pins_block;
@@ -863,62 +863,65 @@ sub query($self, $user_text, $optshro=undef) {
     my $response_text = '';
     my $response_metadata = {};
 
-    if ($should_stream) {
-        my $cb = sub ($piece) {
-            $response_text .= $piece;
-            if ($on_chunk) {
-                $on_chunk->($piece);
-            } elsif ($print_fh) {
-                print $print_fh $piece;
-            }
-        };
-        my $result = $self->{core}->complete_request(\@messages, {
-            stream => 1,
-            on_chunk => $cb,
-            fallbacks_ok => $self->{_fallbacks_ok},
-            append_tool_calls => $optshro->{append_tool_calls},
-            media_items => \@media_items,
-        });
-
-        # Extract content and metadata from result
-        $response_text = $result->{content} if ref($result) eq 'HASH';
-        $response_metadata = $result->{metadata} || {} if ref($result) eq 'HASH';
-
-        # If old API (just returns string), handle gracefully
-        if (ref($result) ne 'HASH') {
-            $response_text = $result;
-            $response_metadata = {};
-        }
-    } else {
-        my $result = $self->{core}->complete_request(\@messages, {
-            stream => 0,
-            fallbacks_ok => $self->{_fallbacks_ok},
-            append_tool_calls => $optshro->{append_tool_calls}
-        });
-
-        # Extract content and metadata
-        if (ref($result) eq 'HASH') {
-            $response_text = $result->{content};
-            $response_metadata = $result->{metadata} || {};
+    my $do_complete = sub {
+        if ($should_stream) {
+            my $cb = sub ($piece) {
+                $response_text .= $piece;
+                if ($on_chunk) {
+                    $on_chunk->($piece);
+                } elsif ($print_fh) {
+                    print $print_fh $piece;
+                }
+            };
+            my $result = $self->{core}->complete_request(\@messages, {
+                stream            => 1,
+                on_chunk          => $cb,
+                fallbacks_ok      => $self->{_fallbacks_ok},
+                append_tool_calls => $optshro->{append_tool_calls},
+                media_items       => \@media_items,
+            });
+            $response_text     = ref($result) eq 'HASH' ? $result->{content}            : $result;
+            $response_metadata = ref($result) eq 'HASH' ? ($result->{metadata} || {})   : {};
         } else {
-            # Old API compatibility
-            $response_text = $result;
-            $response_metadata = {};
+            my $result = $self->{core}->complete_request(\@messages, {
+                stream            => 0,
+                fallbacks_ok      => $self->{_fallbacks_ok},
+                append_tool_calls => $optshro->{append_tool_calls},
+            });
+            if (ref($result) eq 'HASH') {
+                $response_text     = $result->{content};
+                $response_metadata = $result->{metadata} || {};
+            } else {
+                $response_text     = $result;
+                $response_metadata = {};
+            }
+            my $filtered = $self->_apply_thought_filter($response_text);
+            print $print_fh $filtered if $print_fh && !$on_chunk;
+            $on_chunk->($filtered)    if $on_chunk;
+            $response_text = $filtered;
         }
+    };
 
-        # Apply thought filtering to complete response
-        my $filtered_response = $self->_apply_thought_filter($response_text);
-
-        # Output the filtered result
-        if ($print_fh && !$on_chunk) {
-            print $print_fh $filtered_response;
+    eval { $do_complete->() };
+    if (my $err = $@) {
+        # Connection / server errors: give the user a clean message and bail
+        # with a sentinel so z (or API callers) can exit with a useful code.
+        if ($err =~ /^ECONNFAIL:/) {
+            my $url = $self->{core}{api_url} // '(unknown)';
+            (my $detail = $err) =~ s/^ECONNFAIL:\s*//;
+            chomp $detail;
+            print STDERR "Error: cannot reach LLM server at $url ($detail)\n";
+            print STDERR "Check that the server is running and --api-url (or env vars) are correct (see -h).\n";
+            die "ZCHAT_ECONNFAIL\n";   # sentinel for z to catch and exit(75)
         }
-        if ($on_chunk) {
-            $on_chunk->($filtered_response);
+        if ($err =~ /^ESERVERERR\((\d+)\):/) {
+            my $code = $1;
+            (my $detail = $err) =~ s/^ESERVERERR\(\d+\):\s*//;
+            chomp $detail;
+            print STDERR "Error: LLM server returned HTTP $code: $detail\n";
+            die "ZCHAT_ESERVERERR\n";
         }
-
-        # Use filtered version for return and storage
-        $response_text = $filtered_response;
+        die $err;   # re-throw anything else unchanged
     }
 
     if ($response_text !~ /\n$/) {

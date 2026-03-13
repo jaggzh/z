@@ -46,28 +46,28 @@ sub new {
 	}
 
     bless $self, $class;
-    
+
     sel(2, "Backend detected/configured: " . ($self->{backend} // 'auto-detect'));
     sel(2, "API URL: " . ($self->{api_url} // 'none'));
-    
+
     return $self;
 }
 
 # Build standard headers for API requests
 sub _build_headers {
     my ($self, %extra_headers) = @_;
-    
+
     my %headers = (
         'Content-Type' => 'application/json',
         %extra_headers
     );
-    
+
     # Use provided API key, or fallback if none provided
     my $api_key = $self->{api_key} || $self->{fallback_api_key};
     if ($api_key) {
         $headers{'Authorization'} = "Bearer $api_key";
     }
-    
+
     return \%headers;
 }
 
@@ -92,7 +92,7 @@ sub complete_request($self, $messages, $optshro=undef) {
     if (@$media_items && @$messages && $messages->[-1]{role} eq 'user') {
         my $user_text = $messages->[-1]{content};
         my @content_parts;
-        
+
         # Add text part
         if (defined $user_text && length $user_text) {
             push @content_parts, {
@@ -100,7 +100,7 @@ sub complete_request($self, $messages, $optshro=undef) {
                 text => $user_text
             };
         }
-        
+
         # Add media parts
         for my $m (@$media_items) {
             if ($m->{type} eq 'image') {
@@ -122,7 +122,7 @@ sub complete_request($self, $messages, $optshro=undef) {
                 sel(3, "Added audio to message: $$m{mime_type}");
             }
         }
-        
+
         $messages->[-1]{content} = \@content_parts;
         sel(2, "Converted user message to multimodal with " . @$media_items . " media items");
     }
@@ -246,6 +246,17 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
     # Execute request
     $ua->start($tx);
 
+    # Check for connection-level errors (server down, timeout, refused, etc.)
+    if (my $err = $tx->error) {
+        my $msg = $err->{message} // 'unknown error';
+        my $code = $err->{code};
+        if (!$code || $code == 599) {
+            # 599 = Mojo's internal code for connection errors
+            die "ECONNFAIL: $msg\n";
+        }
+        die "ESERVERERR($code): $msg\n";
+    }
+
     # Append collected tool calls if requested
     if ($optshro->{append_tool_calls} && @collected_tool_calls) {
         my $tool_calls_text = '';
@@ -259,7 +270,7 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
                 $tool_calls_text .= "\nTOOL_CALL: $tool_json";
             }
         }
-        
+
         if ($tool_calls_text) {
             $answer .= $tool_calls_text;
             if ($on_chunk) {
@@ -296,7 +307,13 @@ sub _sync_completion($self, $data, $model_name, $optshro=undef) {
     );
 
     unless ($tx->res->is_success) {
-        die "API request failed: " . $tx->res->message;
+        my $err  = $tx->error;
+        my $code = $err->{code};
+        my $msg  = $err->{message} // $tx->res->message // 'unknown error';
+        if (!$code || $code == 599) {
+            die "ECONNFAIL: $msg\n";
+        }
+        die "ESERVERERR($code): $msg\n";
     }
 
     my $response = $tx->res->json;
@@ -455,13 +472,13 @@ sub _build_headers_for {
 sub _build_url {
     my ($self, $path) = @_;
     my $base = $self->{api_url};
-    
+
     # Remove trailing slash from base if present
     $base =~ s{/$}{};
-    
+
     # Ensure path starts with /
     $path = "/$path" unless $path =~ m{^/};
-    
+
     return "$base$path";
 }
 
@@ -503,13 +520,13 @@ sub tokenize {
 
     my $json = encode_json($request_data);
     my $req = HTTP::Request->new('POST', $url);
-    
+
     # Use consistent header building
     my $headers = $self->_build_headers();
     for my $header_name (keys %$headers) {
         $req->header($header_name => $headers->{$header_name});
     }
-    
+
     $req->content($json);
 
     my $res = $ua->request($req);
@@ -590,14 +607,14 @@ sub health_check {
     my ($self) = @_;
 
     my $ua = LWP::UserAgent->new(timeout => 2);
-    
+
     # Build request with headers for consistency
     my $req = HTTP::Request->new('GET', $self->_build_url('/health'));
     my $headers = $self->_build_headers();
     for my $header_name (keys %$headers) {
         $req->header($header_name => $headers->{$header_name});
     }
-    
+
     my $response = $ua->request($req);
 
     return {
@@ -651,15 +668,15 @@ sub _resolve_api_url {
     	_get_openai_envval(),
     );
     my $url = _first_defined($opt_val, $env_val);
-    
+
     # Normalize: ensure http/https prefix, strip common API path suffixes
     if (defined $url && length $url) {
         $url = "http://$url" unless $url =~ m{^https?://}i;
         $url =~ s{/v1$}{};      # Remove /v1 suffix if present
-        $url =~ s{/api$}{};     # Remove /api suffix if present  
+        $url =~ s{/api$}{};     # Remove /api suffix if present
         $url =~ s{/$}{};        # Remove trailing slash
     }
-    
+
     return $url;
 }
 

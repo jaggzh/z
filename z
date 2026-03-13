@@ -1233,10 +1233,11 @@ if (defined $uprompt && length $uprompt) {
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results if $tool_results;
         $query_opts->{media_ids} = \@media_ids if @media_ids;
-        my $response = $zchat->query($uprompt, $query_opts);
+        my $response = eval { $zchat->query($uprompt, $query_opts) };
+        _handle_zchat_error($@) if $@;
 
         if ($opt->play_resp) {
-            eval { play_tts($response) };   # or whatever your fn is called
+            eval { play_tts($response) };
             warn "Audio error: $@" if $@;
         }
     }
@@ -1245,7 +1246,8 @@ if (defined $uprompt && length $uprompt) {
         my $query_opts = { stream => 1 };
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results;
-        my $response = $zchat->query(undef, $query_opts);
+        my $response = eval { $zchat->query(undef, $query_opts) };
+        _handle_zchat_error($@) if $@;
 
         if ($opt->play_resp) {
             eval { play_tts($response) };
@@ -1330,7 +1332,15 @@ while (1) {
 
     # Make completion request
     print $clr_sys;
-    my $response = $zchat->query($line, { stream=>1 } );
+    my $response = eval { $zchat->query($line, { stream=>1 } ) };
+    if (my $err = $@) {
+        # Connection error in interactive mode: warn and let user try again
+        if ($err =~ /^ZCHAT_ECONN/) {
+            say $rst;
+            next;
+        }
+        die $err;   # anything else is fatal
+    }
     say $rst if $intmode;
     tts_str($response) if $opt->play_resp; # TTSresponse
 }
@@ -1345,6 +1355,23 @@ sub tts_str {
     open(my $ttsf, "|-", @cmd_tts) || die "Couldn't execute TTS: $cmd_tts[0]: $!";
     print $ttsf $str;
     close $ttsf;
+}
+
+
+# Exit code 75 = EX_TEMPFAIL (sysexits.h) - service temporarily unavailable.
+# Used when the LLM server is unreachable.
+use constant EX_TEMPFAIL => 75;
+
+sub _handle_zchat_error {
+    my ($err) = @_;
+    return unless $err;
+    if ($err =~ /^ZCHAT_ECONNFAIL/) {
+        exit EX_TEMPFAIL;
+    }
+    if ($err =~ /^ZCHAT_ESERVERERR/) {
+        exit 1;
+    }
+    die $err;   # unexpected - let it propagate as a normal fatal error
 }
 
 __END__

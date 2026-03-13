@@ -1195,8 +1195,8 @@ if ($opt->edit_hist) {
 if ($opt->dump_sys) {
     my $rendered = $zchat->get_rendered_system_prompt();
     serr "Rendered system prompt is undef" if !defined $rendered;
-    $DB::single=1;
     print $rendered;
+    say '' if $rendered !~ /\n$/s;
     exit;
 }
 

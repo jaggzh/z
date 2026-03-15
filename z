@@ -198,20 +198,20 @@ my ($opt, $usage) = describe_options(
     [],
     [ 'pin-sys=s@',         "Add system pin(s)" ],
     [ 'pin-user=s@',        "Add user pin(s)" ],
+    [ 'pin-user-mate=s',    "Persistent default content for pin-user assistant content (mate)" ],
     [ 'pin-ast=s@',         "Add assistant pin(s) (shorthand: ast)" ],
+    [ 'pin-ast-mate=s',     "Persistent default content for pin-ast role content (mate)" ],
     [ 'pin-id=s',           "Name/id for the next pin add, write, or rm operation" ],
-    [ 'pin-ua-pipe=s@',     "Add paired user|||assistant pin(s). 3-field: id|||user|||assistant" ],
+    [ 'pin-ua-pipe=s@',     "Add paired user|||assistant pin(s). 3-field: id|||user|||assistant (can set pin-mode-user and pin-mode-ast" ],
     [ 'pin-ua-json=s@',     "Add paired pins from JSON object(s) with {user,assistant,id}" ],
     [ 'pins-clear-user',    "Clear user pins only" ],
     [ 'pins-clear-ast',     "Clear assistant pins only" ],
     [ 'pins-clear-sys',     "Clear system pins only" ],
-    [ 'pin-shim-user=s',     "Default content for auto-injected user bridging messages (mate)" ],
-    [ 'pin-shim-ast=s',      "Default content for auto-injected assistant bridging messages (mate)" ],
     [ 'pin-tpl-user=s',     "Template for user pins when using vars/varsfirst mode" ],
     [ 'pin-tpl-ast=s',      "Template for assistant pins when using vars/varsfirst mode" ],
-    [ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: vars)" ],
-    [ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: concat)" ],
-    [ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: concat)" ],
+    [ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: concat)" ],
+    [ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: vars)" ],
+    [ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: vars)" ],
     [],
     [ help_sec('Tools (new, experimental):') ],
     [ 'tool-result=s@',     "Post tool result: --tool-result 'name:data' or '[id]name:data'" ],
@@ -558,8 +558,8 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     $store_opts{system}         = $opt->system         if defined $opt->system;
 
     # Pin options
-    $store_opts{pin_mate_user} = $opt->pin_shim_user if defined $opt->pin_shim_user;
-    $store_opts{pin_mate_ast}  = $opt->pin_shim_ast  if defined $opt->pin_shim_ast;
+    $store_opts{pin_mate_user} = $opt->pin_mate_user if defined $opt->pin_mate_user;
+    $store_opts{pin_mate_ast}  = $opt->pin_mate_ast  if defined $opt->pin_mate_ast;
     $store_opts{pin_tpl_user}   = $opt->pin_tpl_user   if defined $opt->pin_tpl_user;
     $store_opts{pin_tpl_ast}    = $opt->pin_tpl_ast    if defined $opt->pin_tpl_ast;
     $store_opts{pin_mode_sys}   = $opt->pin_mode_sys   if defined $opt->pin_mode_sys;

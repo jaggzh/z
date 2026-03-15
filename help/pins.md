@@ -52,7 +52,7 @@ Below is everything you need: options (complete), quick recipes for common needs
 
 **Pipes format (txt):**
 - Each non-empty, non-comment line is one item.
-- `user|||assistant` creates two pins (paired).
+- `user|||assistant` creates two pins; user AND assistant content, honoring their corresponding --pin-mode-\*. *(You likely want the mode to match, and pinning messages is likely the most-common use-case, so our default mode is 'vars', so a piped pair of user-ast content will go in as a user message followed by an assistant.)*
 - A single field line creates a user pin.
 - Escapes supported in fields: `\|` for literal `|`, `\\` for `\`, `\n` for newline.
 - BOM/CRLF handled; lines starting with `#` ignored.

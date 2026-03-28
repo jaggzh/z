@@ -166,13 +166,27 @@ sub _get_system_defaults {
             user => 50,
             assistant => 50,
         },
-        pin_mate_user => '',   # content for auto-injected user bridging messages
-        pin_mate_ast  => '',   # content for auto-injected assistant bridging messages
+        # Remove these two if no errors exist:
+        # pin_mate_user => '',   # content for auto-injected user bridging messages (legacy, maps to pin_user_msg_mate)
+        # pin_mate_ast  => '',   # content for auto-injected assistant bridging messages (legacy, maps to pin_ast_msg_mate)
+        pin_user_concat_mate     => '',
+        pin_user_msg_mate        => '',
+        pin_user_concatvars_mate => '',
+        pin_ast_concat_mate      => '',
+        pin_ast_msg_mate         => '',
+        pin_ast_concatvars_mate  => '',
+        pin_user_order           => 'concat,msg,concatvars',
+        pin_ast_order            => 'concat,msg,concatvars',
+        pin_role_order           => 'user,assistant',
+        pin_user_concat_join     => "\n",
+        pin_ast_concat_join      => "\n",
+        pin_user_concatvars_join => "\n",
+        pin_ast_concatvars_join  => "\n",
         pin_tpl_user => undef,
         pin_tpl_ast => undef,
         pin_mode_sys => 'concat',    # vars|concat  (vars = opt-out: place $pins_str yourself)
-        pin_mode_user => 'concat',   # vars|varsfirst|concat
-        pin_mode_ast => 'concat',    # vars|varsfirst|concat
+        pin_mode_user => 'vars',     # vars|varsfirst|concat
+        pin_mode_ast => 'vars',      # vars|varsfirst|concat
     };
 }
 
@@ -227,7 +241,7 @@ sub store_user_config {
         my $existing = $self->_load_user_config() || {};
         $config_to_save = $existing;
 
-        for my $key (qw(session system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_mode_sys pin_mode_user pin_mode_ast pin_mate_user pin_mate_ast)) {
+        for my $key (qw(session system_string system_file system_persona system pin_tpl_user pin_tpl_ast pin_tpl_user_concatvars pin_tpl_ast_concatvars pin_mode_sys pin_mode_user pin_mode_ast pin_mate_user pin_mate_ast pin_user_concat_mate pin_user_msg_mate pin_user_concatvars_mate pin_ast_concat_mate pin_ast_msg_mate pin_ast_concatvars_mate pin_user_order pin_ast_order pin_role_order pin_user_concat_join pin_ast_concat_join pin_user_concatvars_join pin_ast_concatvars_join)) {
             if (defined $optshr->{$key}) {
                 $config_to_save->{$key} = $optshr->{$key};
             }
@@ -359,22 +373,56 @@ sub get_pin_mode_sys {
 
 sub get_pin_mode_user {
     my ($self) = @_;
-    return $self->{effective_config}->{pin_mode_user} || 'concat';
+    return $self->{effective_config}->{pin_mode_user} || 'msg';
 }
 
 sub get_pin_mode_ast {
     my ($self) = @_;
-    return $self->{effective_config}->{pin_mode_ast} || 'concat';
+    return $self->{effective_config}->{pin_mode_ast} || 'msg';
 }
 
 sub get_pin_tpl_user {
     my ($self) = @_;
-    return $self->{effective_config}->{pin_tpl_user};
+    return $self->{effective_config}->{pin_tpl_user_concatvars}
+        // $self->{effective_config}->{pin_tpl_user};
 }
 
 sub get_pin_tpl_ast {
     my ($self) = @_;
-    return $self->{effective_config}->{pin_tpl_ast};
+    return $self->{effective_config}->{pin_tpl_ast_concatvars}
+        // $self->{effective_config}->{pin_tpl_ast};
+}
+
+# Returns the full config hash expected by Pin::build_message_array_with_mates.
+sub get_pin_config {
+    my ($self) = @_;
+    my $cfg = $self->{effective_config};
+    return {
+        # Role ordering (which role group comes first in the message array)
+        role_order             => [split /,/, ($cfg->{pin_role_order} // 'user,assistant')],
+
+        # Method ordering within each role
+        user_order             => ($cfg->{pin_user_order} // 'concat,msg,concatvars'),
+        ast_order              => ($cfg->{pin_ast_order}  // 'concat,msg,concatvars'),
+
+        # Mates: per-method per-role (global fallbacks for that method)
+        user_concat_mate       => ($cfg->{pin_user_concat_mate}      // ''),
+        user_msg_mate          => ($cfg->{pin_user_msg_mate}         // ''),
+        user_concatvars_mate   => ($cfg->{pin_user_concatvars_mate}  // ''),
+        ast_concat_mate        => ($cfg->{pin_ast_concat_mate}       // ''),
+        ast_msg_mate           => ($cfg->{pin_ast_msg_mate}          // ''),
+        ast_concatvars_mate    => ($cfg->{pin_ast_concatvars_mate}   // ''),
+
+        # Templates (concatvars only; fall back to old pin_tpl_* keys)
+        user_concatvars_tpl    => ($cfg->{pin_tpl_user_concatvars} // $cfg->{pin_tpl_user}),
+        ast_concatvars_tpl     => ($cfg->{pin_tpl_ast_concatvars}  // $cfg->{pin_tpl_ast}),
+
+        # Join separators for multi-pin methods
+        user_concat_join       => ($cfg->{pin_user_concat_join}      // "\n"),
+        ast_concat_join        => ($cfg->{pin_ast_concat_join}       // "\n"),
+        user_concatvars_join   => ($cfg->{pin_user_concatvars_join}  // "\n"),
+        ast_concatvars_join    => ($cfg->{pin_ast_concatvars_join}   // "\n"),
+    };
 }
 
 sub set_system_candidate {

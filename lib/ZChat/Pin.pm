@@ -39,19 +39,24 @@ sub add_pin($self, $content, $opts=undef) {
     $self->_load_pins();
 
     my $role   = $opts->{role}   || 'system';
-    my $method = $opts->{method} || 'concat';
-    my $id     = $opts->{id};       # optional name; undef means unnamed
+    my $id     = $opts->{id};
+    my $mate   = $opts->{mate};   # per-pin mate content (msg pins only)
 
-    # Validate role
     unless ($role =~ /^(system|user|assistant)$/) {
         warn "Invalid pin role '$role', using 'system'";
         $role = 'system';
     }
 
-    # Validate method
-    unless ($method =~ /^(concat|msg)$/) {
-        warn "Invalid pin method '$method', using 'concat'";
+    # System pins are always concat. User/ast default to msg.
+    my $method;
+    if ($role eq 'system') {
         $method = 'concat';
+    } else {
+        $method = $opts->{method} || 'msg';
+        unless ($method =~ /^(concat|msg|concatvars)$/) {
+            warn "Invalid pin method '$method', using 'msg'";
+            $method = 'msg';
+        }
     }
 
     my $pin = {
@@ -59,12 +64,11 @@ sub add_pin($self, $content, $opts=undef) {
         role      => $role,
         method    => $method,
         timestamp => time(),
-        (defined $id ? (id => $id) : ()),
+        (defined $id   ? (id   => $id)   : ()),
+        (defined $mate ? (mate => $mate) : ()),
     };
 
     push @{$self->{pins}}, $pin;
-
-    # Save to storage
     return $self->_save_pins();
 }
 
@@ -158,187 +162,127 @@ sub validate_pin_indices {
     return (1, "All indices valid");
 }
 
-sub build_message_array {
-    my ($self) = @_;
+sub build_message_array_with_mates {
+    my ($self, $config) = @_;
+    $config ||= {};
     $self->_load_pins();
-
-    return [] unless @{$self->{pins}};
 
     my @messages;
 
-    # Group pins by role and method
-    my %grouped = (
-        system => { concat => [], msg => [] },
-        assistant => { concat => [], msg => [] },
-        user => { concat => [], msg => [] },
+    # System pins are assembled into the system string by _get_system_content.
+    # Only process user and assistant pins here.
+    my @role_order = @{ $config->{role_order} // [qw(user assistant)] };
+
+    for my $role (@role_order) {
+        next if $role eq 'system';
+        my $alt = $role eq 'user' ? 'assistant' : 'user';
+
+        # Group this role's pins by method
+        my %buckets;
+        for my $pin (grep { $_->{role} eq $role } @{$self->{pins}}) {
+            my $m = $pin->{method} // 'msg';
+            push @{ $buckets{$m} }, $pin;
+        }
+
+        my @method_order = split /,/, ($config->{"${role}_order"} // 'concat,msg,concatvars');
+
+        for my $method (@method_order) {
+            my $pins = $buckets{$method};
+            next unless $pins && @$pins;
+
+            if ($method eq 'concat') {
+                # All concat pins joined into one message + one mate
+                my $sep     = $config->{"${role}_concat_join"} // "\n";
+                my $content = join($sep, map { $_->{content} } @$pins);
+                my $mate    = $config->{"${role}_concat_mate"} // '';
+                push @messages,
+                    { role => $role, content => $content, is_pinned => 1, _method => 'concat' },
+                    { role => $alt,  content => $mate,    is_pinned => 1, _method => 'concat', _injected_mate => 1 };
+
+            } elsif ($method eq 'msg') {
+                # One message + mate per pin; mate stored per-pin or from config
+                for my $pin (@$pins) {
+                    my $mate = (defined $pin->{mate} ? $pin->{mate}
+                                                     : ($config->{"${role}_msg_mate"} // ''));
+                    push @messages,
+                        { role => $role, content => $pin->{content}, is_pinned => 1,
+                          _method => 'msg', _pin_id => ($pin->{id} // '') },
+                        { role => $alt,  content => $mate,           is_pinned => 1,
+                          _method => 'msg', _injected_mate => 1 };
+                }
+
+            } elsif ($method eq 'concatvars') {
+                # Each pin rendered through template; results joined into one message + one mate
+                my $tpl = $config->{"${role}_concatvars_tpl"};
+                my @pin_ids  = map { $_->{id} // '' } @$pins;
+                my @contents = map { $_->{content} } @$pins;
+                my $pins_str = join("\n", @contents);
+                my $pin_cnt  = scalar @$pins;
+
+                my @rendered;
+                for my $i (0 .. $#$pins) {
+                    my $vars = {
+                        pins     => \@contents,
+                        pins_str => $pins_str,
+                        pin_cnt  => $pin_cnt,
+                        pin_idx  => $i,
+                        pin_last => ($i == $#$pins) ? 1 : 0,
+                        pin_id   => $pins->[$i]{id} // '',
+                        pin_ids  => \@pin_ids,
+                        pin_str  => $pins->[$i]{content},
+                    };
+                    if ($tpl) {
+                        push @rendered, $self->_apply_template($tpl, $vars);
+                    } else {
+                        # No template: fall back to raw content (same as concat)
+                        push @rendered, $pins->[$i]{content};
+                    }
+                }
+
+                my $sep     = $config->{"${role}_concatvars_join"} // "\n";
+                my $content = join($sep, @rendered);
+                my $mate    = $config->{"${role}_concatvars_mate"} // '';
+                push @messages,
+                    { role => $role, content => $content, is_pinned => 1, _method => 'concatvars' },
+                    { role => $alt,  content => $mate,    is_pinned => 1, _method => 'concatvars', _injected_mate => 1 };
+            }
+        }
+    }
+
+    # Safety net: catch any remaining alternation violations that can arise when
+    # both user and assistant pin groups are used together.
+    my %bridge = (
+        user      => $config->{user_msg_mate} // '',
+        assistant => $config->{ast_msg_mate}  // '',
     );
-
-    for my $pin (@{$self->{pins}}) {
-        push @{$grouped{$pin->{role}}{$pin->{method}}}, $pin;
-    }
-
-    # Build messages in hard-coded order:
-    # 1. System pins (concat only - system pins are always concat)
-    if (@{$grouped{system}{concat}}) {
-        my $content = join("\n", map { $_->{content} } @{$grouped{system}{concat}});
-        push @messages, {
-            role => 'system',
-            content => $content,
-            is_pinned => 1,
-        };
-    }
-
-    # 2. Assistant pins (concat)
-    if (@{$grouped{assistant}{concat}}) {
-        my $content = join("\n", map { $_->{content} } @{$grouped{assistant}{concat}});
-        push @messages, {
-            role => 'assistant',
-            content => $content,
-            is_pinned => 1,
-        };
-    }
-
-    # 3. User pins (concat)
-    if (@{$grouped{user}{concat}}) {
-        my $content = join("\n", map { $_->{content} } @{$grouped{user}{concat}});
-        push @messages, {
-            role => 'user',
-            content => $content,
-            is_pinned => 1,
-        };
-    }
-
-    # 4. Individual assistant pins
-    for my $pin (@{$grouped{assistant}{msg}}) {
-        push @messages, {
-            role => 'assistant',
-            content => $pin->{content},
-            is_pinned => 1,
-        };
-    }
-
-    # 5. Individual user pins
-    for my $pin (@{$grouped{user}{msg}}) {
-        push @messages, {
-            role => 'user',
-            content => $pin->{content},
-            is_pinned => 1,
-        };
-    }
+    _fix_alternation(\@messages, \%bridge);
 
     return \@messages;
 }
 
-sub _process_role_pins {
-    my ($self, $messages, $role, $mode, $mates, $template) = @_;
-
-    # System pins always belong in the system string (_get_system_content handles
-    # all modes for system). Never leave them as messages in the array.
-    if ($role eq 'system') {
-        @$messages = grep { !($_->{is_pinned} && $_->{role} eq 'system') } @$messages;
-        return;
-    }
-
-    # Find concat-method pinned messages for this role.
-    # msg-method pins are individual messages and pass through unchanged.
-    my @role_messages = grep { $_->{is_pinned} && $_->{role} eq $role && ($_->{method}//'') eq 'concat' } @$messages;
-    return unless @role_messages;
-
-    if ($mode eq 'vars' || $mode eq 'varsfirst') {
-        # Template variables contain only concat-method pins for this role,
-        # keeping scope clean and avoiding bleed from other roles/methods.
-        my @role_pins = map { $_->{content} } @role_messages;
-        my $pins_str = join("\n", @role_pins);
-        my $pin_cnt  = scalar @role_pins;
-
-        for my $i (0..$#role_messages) {
-            my $msg = $role_messages[$i];
-
-            # varsfirst: process template once using first slot; suppress the rest
-            if ($mode eq 'varsfirst' && $i > 0) {
-                $msg->{_remove} = 1;
-                next;
-            }
-
-            my $content = $template // $msg->{content};
-
-            if ($template || $content =~ /<:|:\>|^\s*:/) {
-                $content = $self->_apply_template($content, {
-                    pins     => \@role_pins,
-                    pins_str => $pins_str,
-                    pin_cnt  => $pin_cnt,
-                    pin_idx  => $i,
-                    pin_last => ($i == $pin_cnt - 1) ? 1 : 0,
-                });
-            }
-
-            $msg->{content} = $content;
-        }
-    }
-    # concat mode: no suffix appending. Content is already concatenated by
-    # build_message_array(). Mate injection for alternation is handled
-    # solely by _ensure_alternating_roles().
-}
-
-sub build_message_array_with_mates($self, $mates, $optshro=undef) {
-    $optshro ||= {};
-    # mates: { user => '...', assistant => '...' }
-    # These are the *full content* of auto-injected bridging messages when
-    # alternating-role constraints require a synthetic turn. They are NOT
-    # appended as suffixes to real pinned content.
-    $mates ||= {};
-
-    my $messages = $self->build_message_array();
-
-    my $sys_mode      = $optshro->{sys_mode}      // 'vars';
-    my $user_mode     = $optshro->{user_mode}      // 'concat';
-    my $ast_mode      = $optshro->{ast_mode}       // 'concat';
-    my $user_template = $optshro->{user_template};
-    my $ast_template  = $optshro->{ast_template};
-
-    $self->_process_role_pins($messages, 'system',    $sys_mode,  $mates, undef);
-    $self->_process_role_pins($messages, 'user',      $user_mode, $mates, $user_template);
-    $self->_process_role_pins($messages, 'assistant', $ast_mode,  $mates, $ast_template);
-
-    # Remove messages suppressed by varsfirst
-    @$messages = grep { !$_->{_remove} } @$messages;
-
-    # Inject bridging messages where alternation is violated
-    $self->_ensure_alternating_roles($messages, $mates);
-
-    return $messages;
-}
-
-sub _ensure_alternating_roles {
-    my ($self, $messages, $mates) = @_;
-
-    return unless @$messages > 1;
-
+# Scan for consecutive same-role messages and insert a bridge mate between them.
+sub _fix_alternation {
+    my ($messages, $bridge) = @_;
     my @result;
     my $last_role;
-
     for my $msg (@$messages) {
         if ($msg->{role} eq 'system' || $msg->{role} eq 'tool') {
             push @result, $msg;
             next;
         }
-
         if (defined $last_role && $last_role eq $msg->{role}) {
-            my $alt_role    = ($msg->{role} eq 'user') ? 'assistant' : 'user';
-            my $mate_content = $mates->{$alt_role} // '';
-
+            my $alt = $msg->{role} eq 'user' ? 'assistant' : 'user';
             push @result, {
-                role           => $alt_role,
-                content        => $mate_content,
+                role           => $alt,
+                content        => $bridge->{$alt} // '',
                 is_pinned      => 1,
                 _injected_mate => 1,
+                _method        => 'bridge',
             };
         }
-
         push @result, $msg;
         $last_role = $msg->{role};
     }
-
     @$messages = @result;
 }
 
@@ -519,8 +463,17 @@ ZChat::Pin - Pin management for ZChat
 
 =head1 DESCRIPTION
 
-Manages pinned messages with ordering, concatenation, and storage.
-Implements the hard-coded message order: system pins, then assistant
-concat, user concat, assistant individual, user individual.
+Manages pinned messages with three methods:
+
+  concat     - all pins of this role joined into one message (one mate)
+  msg        - one message per pin; mate stored per-pin or from config
+  concatvars - each pin rendered through a template, results joined into one message
+
+System pins are always concat and are assembled into the system prompt string
+by ZChat::_get_system_content(), not into the message array.
+
+Assembly order within a role is controlled by the C<user_order>/C<ast_order>
+config keys (default: concat, msg, concatvars). Role order (user vs assistant
+groups) is controlled by C<role_order> (default: user first).
 
 =cut

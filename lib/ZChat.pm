@@ -810,17 +810,8 @@ sub query($self, $user_text, $optshro=undef) {
     );
 
     # Build messages using the complete template functionality
-    my $mates    = $self->{config}->get_pin_mates();
-    my $pins_msgs = $self->{pin_mgr}->build_message_array_with_mates(
-        $mates,
-        {
-            sys_mode      => ($self->{config}->get_pin_mode_sys()  // 'concat'),
-            user_mode     => ($self->{config}->get_pin_mode_user() // 'concat'),
-            ast_mode      => ($self->{config}->get_pin_mode_ast()  // 'concat'),
-            user_template => $self->{config}->get_pin_tpl_user(),
-            ast_template  => $self->{config}->get_pin_tpl_ast(),
-        },
-    );
+    my $pin_config = $self->{config}->get_pin_config();
+    my $pins_msgs  = $self->{pin_mgr}->build_message_array_with_mates($pin_config);
 
     my @context   = @{ $self->{history}->messages() // [] };
 

@@ -196,22 +196,35 @@ my ($opt, $usage) = describe_options(
     [ 'pins-user-max=i',    "Max user pins", { default => $def_pin_max } ],
     [ 'pins-ast-max=i',     "Max assistant pins", { default => $def_pin_max } ],
     [],
-    [ 'pin-sys=s@',         "Add system pin(s)" ],
-    [ 'pin-user=s@',        "Add user pin(s)" ],
-    [ 'pin-user-mate=s',    "Persistent default content for pin-user assistant content (mate)" ],
-    [ 'pin-ast=s@',         "Add assistant pin(s) (shorthand: ast)" ],
-    [ 'pin-ast-mate=s',     "Persistent default content for pin-ast role content (mate)" ],
-    [ 'pin-id=s',           "Name/id for the next pin add, write, or rm operation" ],
-    [ 'pin-ua-pipe=s@',     "Add paired user|||assistant pin(s). 3-field: id|||user|||assistant (can set pin-mode-user and pin-mode-ast" ],
-    [ 'pin-ua-json=s@',     "Add paired pins from JSON object(s) with {user,assistant,id}" ],
-    [ 'pins-clear-user',    "Clear user pins only" ],
-    [ 'pins-clear-ast',     "Clear assistant pins only" ],
-    [ 'pins-clear-sys',     "Clear system pins only" ],
-    [ 'pin-tpl-user=s',     "Template for user pins when using vars/varsfirst mode" ],
-    [ 'pin-tpl-ast=s',      "Template for assistant pins when using vars/varsfirst mode" ],
-    [ 'pin-mode-sys=s',     "How to include system pins: vars|concat|both (default: concat)" ],
-    [ 'pin-mode-user=s',    "How to include user pins: vars|varsfirst|concat (default: vars)" ],
-    [ 'pin-mode-ast=s',     "How to include assistant pins: vars|varsfirst|concat (default: vars)" ],
+    [ 'pin-sys=s@',              "Add system pin(s)" ],
+    [ 'pin-user=s@',             "Add user pin(s)" ],
+    [ 'pin-user-mate=s',         "Global mate for user msg pins (assistant response)" ],
+    [ 'pin-user-concat-mate=s',  "Mate for the user concat block" ],
+    [ 'pin-user-concatvars-mate=s', "Mate for the user concatvars block" ],
+    [ 'pin-ast=s@',              "Add assistant pin(s)" ],
+    [ 'pin-ast-mate=s',          "Global mate for ast msg pins (user setup message)" ],
+    [ 'pin-ast-concat-mate=s',   "Mate for the ast concat block" ],
+    [ 'pin-ast-concatvars-mate=s', "Mate for the ast concatvars block" ],
+    [ 'pin-id=s',                "Name/id for the next pin add, write, or rm operation" ],
+    [ 'pin-ua-pipe=s@',          "Add user+mate pin pair: user|||ast or id|||user|||ast" ],
+    [ 'pin-ua-json=s@',          "Add user+mate pin from JSON: {user,assistant,id}" ],
+    [ 'pins-clear-user',         "Clear user pins only" ],
+    [ 'pins-clear-ast',          "Clear assistant pins only" ],
+    [ 'pins-clear-sys',          "Clear system pins only" ],
+    [ 'pin-tpl-user=s',          "Template for user concatvars pins (alias: pin-tpl-user-concatvars)" ],
+    [ 'pin-tpl-user-concatvars=s', "Template for user concatvars pins" ],
+    [ 'pin-tpl-ast=s',           "Template for ast concatvars pins (alias: pin-tpl-ast-concatvars)" ],
+    [ 'pin-tpl-ast-concatvars=s',  "Template for ast concatvars pins" ],
+    [ 'pin-mode-sys=s',          "How to include system pins: vars|concat (default: concat)" ],
+    [ 'pin-mode-user=s',         "Default method for new user pins: concat|msg|concatvars (default: msg)" ],
+    [ 'pin-mode-ast=s',          "Default method for new ast pins: concat|msg|concatvars (default: msg)" ],
+    [ 'pin-user-order=s',        "Method order for user pins, e.g. concat,msg,concatvars" ],
+    [ 'pin-ast-order=s',         "Method order for ast pins" ],
+    [ 'pin-role-order=s',        "Role group order: user,assistant or assistant,user" ],
+    [ 'pin-user-concat-join=s',  "Separator when joining user concat pins (default: newline)" ],
+    [ 'pin-ast-concat-join=s',   "Separator when joining ast concat pins" ],
+    [ 'pin-user-concatvars-join=s', "Separator when joining rendered user concatvars pins" ],
+    [ 'pin-ast-concatvars-join=s',  "Separator when joining rendered ast concatvars pins" ],
     [],
     [ help_sec('Tools (new, experimental):') ],
     [ 'tool-result=s@',     "Post tool result: --tool-result 'name:data' or '[id]name:data'" ],
@@ -232,6 +245,9 @@ if ($opt->help) {
     my $pager = pager();
     print $pager ($usage->text);
     print $pager <<~'EOT';
+
+    Options with a trailing [#]: General precedence in argument processing (0 first).
+
 
     Backend location in your favorite env var(s)
      [currently supported backends: llama.cpp, ollama, openai]:
@@ -557,14 +573,30 @@ if ($opt->store_user || $opt->store_session || $opt->store_pproc) {
     $store_opts{system_persona} = $opt->system_persona if defined $opt->system_persona;
     $store_opts{system}         = $opt->system         if defined $opt->system;
 
-    # Pin options
-    $store_opts{pin_mate_user} = $opt->pin_mate_user if defined $opt->pin_mate_user;
-    $store_opts{pin_mate_ast}  = $opt->pin_mate_ast  if defined $opt->pin_mate_ast;
-    $store_opts{pin_tpl_user}   = $opt->pin_tpl_user   if defined $opt->pin_tpl_user;
-    $store_opts{pin_tpl_ast}    = $opt->pin_tpl_ast    if defined $opt->pin_tpl_ast;
-    $store_opts{pin_mode_sys}   = $opt->pin_mode_sys   if defined $opt->pin_mode_sys;
-    $store_opts{pin_mode_user}  = $opt->pin_mode_user  if defined $opt->pin_mode_user;
-    $store_opts{pin_mode_ast}   = $opt->pin_mode_ast   if defined $opt->pin_mode_ast;
+    # Pin options — mates
+    $store_opts{pin_user_msg_mate}          = $opt->pin_user_mate          if defined $opt->pin_user_mate;
+    $store_opts{pin_ast_msg_mate}           = $opt->pin_ast_mate           if defined $opt->pin_ast_mate;
+    $store_opts{pin_user_concat_mate}       = $opt->pin_user_concat_mate   if defined $opt->pin_user_concat_mate;
+    $store_opts{pin_ast_concat_mate}        = $opt->pin_ast_concat_mate    if defined $opt->pin_ast_concat_mate;
+    $store_opts{pin_user_concatvars_mate}   = $opt->pin_user_concatvars_mate if defined $opt->pin_user_concatvars_mate;
+    $store_opts{pin_ast_concatvars_mate}    = $opt->pin_ast_concatvars_mate  if defined $opt->pin_ast_concatvars_mate;
+    # Pin options — templates
+    $store_opts{pin_tpl_user_concatvars}    = $opt->pin_tpl_user_concatvars // $opt->pin_tpl_user
+                                              if defined $opt->pin_tpl_user_concatvars || defined $opt->pin_tpl_user;
+    $store_opts{pin_tpl_ast_concatvars}     = $opt->pin_tpl_ast_concatvars  // $opt->pin_tpl_ast
+                                              if defined $opt->pin_tpl_ast_concatvars  || defined $opt->pin_tpl_ast;
+    # Pin options — modes and ordering
+    $store_opts{pin_mode_sys}               = $opt->pin_mode_sys    if defined $opt->pin_mode_sys;
+    $store_opts{pin_mode_user}              = $opt->pin_mode_user   if defined $opt->pin_mode_user;
+    $store_opts{pin_mode_ast}               = $opt->pin_mode_ast    if defined $opt->pin_mode_ast;
+    $store_opts{pin_user_order}             = $opt->pin_user_order  if defined $opt->pin_user_order;
+    $store_opts{pin_ast_order}              = $opt->pin_ast_order   if defined $opt->pin_ast_order;
+    $store_opts{pin_role_order}             = $opt->pin_role_order  if defined $opt->pin_role_order;
+    # Pin options — join strings
+    $store_opts{pin_user_concat_join}       = $opt->pin_user_concat_join       if defined $opt->pin_user_concat_join;
+    $store_opts{pin_ast_concat_join}        = $opt->pin_ast_concat_join        if defined $opt->pin_ast_concat_join;
+    $store_opts{pin_user_concatvars_join}   = $opt->pin_user_concatvars_join   if defined $opt->pin_user_concatvars_join;
+    $store_opts{pin_ast_concatvars_join}    = $opt->pin_ast_concatvars_join    if defined $opt->pin_ast_concatvars_join;
 
     if ($opt->store_user) {
         # User config can store session name
@@ -998,7 +1030,9 @@ if ($opt->pins_file) {
 }
 
 # Direct role-specific pins
-my $pin_id = $opt->pin_id;  # optional name for this batch of pins
+my $pin_id       = $opt->pin_id;
+my $dflt_user_m  = $opt->pin_mode_user // $zchat->{config}->get_pin_mode_user();
+my $dflt_ast_m   = $opt->pin_mode_ast  // $zchat->{config}->get_pin_mode_ast();
 my $new_pin_track=0;
 for my $s (@{ $opt->pin_sys  // [] }) {
     $zchat->pin($s, { role=>'system', method=>'concat', ($pin_id ? (id=>$pin_id) : ()) } );
@@ -1009,21 +1043,22 @@ sel 1, "--pin-sys: Added $new_pin_track system pins (concat mode)" if $new_pin_t
 
 $new_pin_track=0;
 for my $s (@{ $opt->pin_user // [] }) {
-    $zchat->pin($s, { role=>'user',   method=>'msg', ($pin_id ? (id=>$pin_id) : ()) } );
+    $zchat->pin($s, { role=>'user', method=>$dflt_user_m, ($pin_id ? (id=>$pin_id) : ()) } );
     $new_pin_track++;
     $non_query_acts++;
 }
-sel 1, "--pin-user: Added $new_pin_track user pins (msg mode)" if $new_pin_track;
+sel 1, "--pin-user: Added $new_pin_track user pins (method: $dflt_user_m)" if $new_pin_track;
 
 $new_pin_track=0;
 for my $s (@{ $opt->pin_ast  // [] }) {
-    $zchat->pin($s, { role=>'assistant', method=>'msg', ($pin_id ? (id=>$pin_id) : ()) } );
+    $zchat->pin($s, { role=>'assistant', method=>$dflt_ast_m, ($pin_id ? (id=>$pin_id) : ()) } );
     $new_pin_track++;
     $non_query_acts++;
 }
-sel 1, "--pin-ast: Added $new_pin_track assistant pins (msg mode)" if $new_pin_track;
+sel 1, "--pin-ast: Added $new_pin_track assistant pins (method: $dflt_ast_m)" if $new_pin_track;
 
 # UA pipe: "user|||assistant" or "id|||user|||assistant"
+# The assistant content is stored as per-pin mate alongside the user pin (method=msg).
 $new_pin_track=0;
 for my $pair (@{ $opt->pin_ua_pipe // [] }) {
     my @parts = split(/\|\|\|/, $pair, 3);
@@ -1039,31 +1074,34 @@ for my $pair (@{ $opt->pin_ua_pipe // [] }) {
     }
     $u //= ''; $a //= '';
     if (length $u) {
-        $zchat->pin($u, { role=>'user', method=>'msg', ($pair_id ? (id=>$pair_id) : ()) });
+        $zchat->pin($u, {
+            role   => 'user',
+            method => 'msg',
+            ($pair_id ? (id   => $pair_id) : ()),
+            (length($a) ? (mate => $a) : ()),
+        });
         $new_pin_track++;
-        sel 2, "--pin-ua-pipe: Adding user pin (msg mode)" . ($pair_id ? " id=$pair_id" : "");
-    }
-    if (length $a) {
-        $zchat->pin($a, { role=>'assistant', method=>'msg', ($pair_id ? (id=>$pair_id) : ()) });
-        $new_pin_track++;
-        sel 2, "--pin-ua-pipe: Adding assistant pin (msg mode)" . ($pair_id ? " id=$pair_id" : "");
+        sel 2, "--pin-ua-pipe: Adding user+mate pin" . ($pair_id ? " id=$pair_id" : "");
     }
     $non_query_acts++;
 }
-sel 1, "--pin-ua-pipe: Added $new_pin_track user/assistant pins." if $new_pin_track;
+sel 1, "--pin-ua-pipe: Added $new_pin_track user pins (with mates)." if $new_pin_track;
 
 # UA JSON: {"user":"...","assistant":"...","id":"..."}
+# Assistant content stored as per-pin mate alongside the user pin.
 $new_pin_track=0;
 for my $json (@{ $opt->pin_ua_json // [] }) {
     my $obj = eval { JSON::XS->new->decode($json) } // {};
     if (ref($obj) eq 'HASH') {
         my $obj_id = $obj->{id} // $pin_id;
         if (defined $obj->{user} && $obj->{user} ne '') {
-            $zchat->pin($obj->{user}, { role=>'user', method=>'msg', ($obj_id ? (id=>$obj_id) : ()) });
-            $new_pin_track++;
-        }
-        if (defined $obj->{assistant} && $obj->{assistant} ne '') {
-            $zchat->pin($obj->{assistant}, { role=>'assistant', method=>'msg', ($obj_id ? (id=>$obj_id) : ()) });
+            $zchat->pin($obj->{user}, {
+                role   => 'user',
+                method => 'msg',
+                ($obj_id ? (id => $obj_id) : ()),
+                (defined $obj->{assistant} && length $obj->{assistant}
+                    ? (mate => $obj->{assistant}) : ()),
+            });
             $new_pin_track++;
         }
     } else {
@@ -1071,7 +1109,7 @@ for my $json (@{ $opt->pin_ua_json // [] }) {
     }
     $non_query_acts++;
 }
-sel 1, "--pin-ua-json: Added $new_pin_track user/assistant pins." if $new_pin_track;
+sel 1, "--pin-ua-json: Added $new_pin_track user pins (with mates)." if $new_pin_track;
 $new_pin_track=0;
 
 

@@ -15,7 +15,7 @@ sub new {
     my $self = {
         storage      => ($opts{storage}      // die "storage required"),
         session_name => ($opts{session}      // die "session required"),
-        mode         => ($opts{mode}         // 'rw'),   # rw | ro | none
+        mode         => ($opts{mode}         // 'rw'),   # rw | ro | a | none
         _messages    => [],
         _loaded      => 0,
     };
@@ -25,7 +25,7 @@ sub new {
 
 sub set_mode {
     my ($self, $mode) = @_;
-    die "set_mode: expected 'rw','ro','none'" unless defined $mode && $mode =~ /^(rw|ro|none)$/;
+    die "set_mode: expected 'rw','ro','a','none'" unless defined $mode && $mode =~ /^(rw|ro|a|none)$/;
     $self->{mode} = $mode;
     return $self;
 }
@@ -35,6 +35,10 @@ sub get_mode { $_[0]{mode} }
 sub load {
     my ($self) = @_;
     return $self if $self->{mode} eq 'none';
+    if ($self->{mode} eq 'a') {   # append-only: don't load past history
+        $self->{_loaded} = 1;
+        return $self;
+    }
     return $self if $self->{_loaded};
     my $msgs = $self->{storage}->load_history($self->{session_name}) // [];
     $self->{_messages} = $msgs;
@@ -44,7 +48,7 @@ sub load {
 
 sub save {
     my ($self) = @_;
-    return $self unless $self->{mode} eq 'rw';
+    return $self unless $self->{mode} =~ /^(rw|a)$/;
     $self->{storage}->save_history($self->{session_name}, $self->{_messages});
     return $self;
 }

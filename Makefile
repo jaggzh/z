@@ -21,6 +21,11 @@ tags:
 llmcat:
 	ls-cat-for-llm $(SRCFILES)
 
+llmls:
+	@echo "=== Begin File list"
+	@printf ' %s\n' $(SRCFILES)
+	@echo "=== End File list"
+
 vi:
 	vim \
 		$(SRCFILES) \

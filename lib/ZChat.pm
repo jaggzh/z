@@ -676,8 +676,12 @@ sub _auto_detect_thought_pattern {
     return unless $self->{_thought}{mode} eq 'auto';
     return unless defined $system_content && length $system_content;
 
+    # Look for ==== z think (no pattern = use default)
+    if ($system_content =~ /^==* *z +think\s*$/m) {
+        $self->{_thought}{pattern} = $def_thought_re;
+        sel 1, "Auto-detected default thought pattern from system prompt";
     # Look for ==== z think <pattern>
-    if ($system_content =~ /^==== *z *think\s+(.+)$/m) {
+    } elsif ($system_content =~ /^==* *z +think\s+(.+)$/m) {
         my $pattern_str = $1;
         chomp $pattern_str;
         eval {
@@ -688,11 +692,6 @@ sub _auto_detect_thought_pattern {
         if ($@) {
             warn "Invalid regex in system prompt thought pattern '$pattern_str': $@\n";
         }
-    }
-    # Look for ==== z think (no pattern = use default)
-    elsif ($system_content =~ /^==== *z *think\s*$/m) {
-        $self->{_thought}{pattern} = $def_thought_re;
-        sel 1, "Auto-detected default thought pattern from system prompt";
     }
 }
 

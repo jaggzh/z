@@ -151,6 +151,7 @@ my ($opt, $usage) = describe_options(
     [ 'wipeold|wipeexp|we|wo=s',  "Wipe/expire msgs older than {FLOAT TIME}[smhdwMyY] (e.g. 1.5h)" ],
     [ 'no-history|H',       "Do not use history (no load, no store)" ],
     [ 'input-only|I',       "Use history BUT do not write to it" ],
+    [ 'output-only|O',      "No past history, but append user/tool + assistant response to session history" ],
     [ 'dump-history|dump|dh', "Dump chat history (user, tool, assistant roles only)" ],
     [ 'dump-text|text|dt',    "Dump chat history (like User:...)" ],
     [ 'dump-sys|dsys',         "Dump rendered system prompt and exit" ],
@@ -670,9 +671,16 @@ if ($opt->thought) {
 }
 
 # History mode mapping
-if ($opt->no_history) { $zchat->history->set_mode('none') }
-elsif ($opt->input_only) { $zchat->history->set_mode('ro') }
-else { $zchat->history->set_mode('rw') }
+if (($opt->output_only // 0)
+     + ($opt->input_only // 0)
+     + ($opt->no_history // 0) > 1) {
+    die "Only one of --output-only (-O), --input-only (-I), --no-history (-H) may be used at a time.\n";
+}
+
+if    ($opt->no_history)   { $zchat->history->set_mode('none') }
+elsif ($opt->input_only)   { $zchat->history->set_mode('ro')   }
+elsif ($opt->output_only)  { $zchat->history->set_mode('a')    }
+else                       { $zchat->history->set_mode('rw')   }
 
 # Wipe (on-disk history)
 if ($opt->wipe) {
@@ -1155,6 +1163,9 @@ if ($opt->wipe) {
     if ($opt->input_only) {
         # This may be unexpected behavior so notify
         sel 0, "Input-only mode - wiping only in memory.";
+    } elsif ($opt->output_only) {
+        # Wipe on-disk history before appending - valid use case, but notify
+        sel 0, "Output-only mode - wipe applied to disk before appending.";
     } elsif ($opt->no_history) {
         # This may be unexpected behavior so notify
         sel 0, "No-history mode - wiping only in memory.";
@@ -1167,6 +1178,7 @@ if ($opt->wipe) {
 # Overwrite last message for a specific role (does not affect pins)
 if (my $role_to_overwrite = $opt->owrite_last) {
     die "Input-only was selected (-I). Overwriting it makes no sense.\n" if $opt->input_only;
+    die "Output-only was selected (-O). Overwriting it makes no sense.\n" if $opt->output_only;
     die "No-history was selected (-H). Overwriting it makes no sense.\n" if $opt->no_history;
     die "--owrite-last requires a prompt (from stdin or arguments) to use as the new content.\n"
         unless defined $uprompt && $uprompt ne '';
@@ -1219,6 +1231,7 @@ sel 1, "${clr_notice_bg}${clr_notice_fg}Session: " . $zchat->get_session_name() 
 # our actions writing data out before we get blocked in the editor run.
 if ($opt->edit_hist) {
     die "Input-only mode - editing makes no sense\n" if $opt->input_only;
+    die "Output-only mode - editing makes no sense\n" if $opt->output_only;
     die "No-history mode - editing makes no sense\n" if $opt->no_history;
 
     my $session_name = $zchat->get_session_name();

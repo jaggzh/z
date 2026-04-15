@@ -1288,7 +1288,7 @@ if (defined $uprompt && length $uprompt) {
         _handle_zchat_error($@) if $@;
 
         if ($opt->play_resp) {
-            eval { play_tts($response) };
+            eval { tts_str($response) };
             warn "Audio error: $@" if $@;
         }
     }
@@ -1301,7 +1301,7 @@ if (defined $uprompt && length $uprompt) {
         _handle_zchat_error($@) if $@;
 
         if ($opt->play_resp) {
-            eval { play_tts($response) };
+            eval { tts_str($response) };
             warn "Audio error: $@" if $@;
         }
     }

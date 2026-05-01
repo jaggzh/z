@@ -524,6 +524,20 @@ sub _get_system_content {
     return $content;
 }
 
+sub _clip_system_content {
+	my ($self, $system_content) = @_;
+    # Remove === z metadata sections
+    if ($system_content =~ s/(^==+\s*z\s+.*)$//sm) { 
+    	my $trimmed = $1;
+        sokl 2, "Trimmed System content == z metadata";
+        sel 3, "Trimmed material: {{$trimmed}}";
+	}
+    
+    # ? Trim trailing whitespace? No, == z marks end
+    # if ($content =~ s/\s+$/\n/g) { }
+    return $system_content;
+}
+
 sub get_rendered_system_prompt {
     my ($self) = @_;
     return $self->_get_system_content();
@@ -676,12 +690,18 @@ sub _auto_detect_thought_pattern {
     return unless $self->{_thought}{mode} eq 'auto';
     return unless defined $system_content && length $system_content;
 
+    # Look for ==== z opt showthought
+    if ($system_content =~ /^==*\s*z\sopt\s+(?:showthought)\b/m) {
+    	sokl 2, "== z opt showthought enables thought display. Streaming should be enabled (and thoughts shown if prompt requests it";
+        $self->{_thought}{mode} = 'disabled';
+	}
+
     # Look for ==== z think (no pattern = use default)
-    if ($system_content =~ /^==* *z +think\s*$/m) {
+    if ($system_content =~ /^==*\s*z\s+think\s*$/m) {
         $self->{_thought}{pattern} = $def_thought_re;
         sel 1, "Auto-detected default thought pattern from system prompt";
     # Look for ==== z think <pattern>
-    } elsif ($system_content =~ /^==* *z +think\s+(.+)$/m) {
+    } elsif ($system_content =~ /^==*\s*z\s+think\s+(.+)$/m) {
         my $pattern_str = $1;
         chomp $pattern_str;
         eval {
@@ -785,7 +805,6 @@ sub query($self, $user_text, $optshro=undef) {
         }
     }
 
-
     # Get system content and auto-detect thought patterns
     my $system_content = $self->_get_system_content();
     if ($system_content) {
@@ -800,8 +819,13 @@ sub query($self, $user_text, $optshro=undef) {
     my $should_stream = $self->_should_stream($optshro);
 
     if (!$should_stream && $self->_should_filter_thoughts()) {
-        sel 2, "Forcing non-streaming mode for reasoning pattern filtering";
+        sel 2, "Forcing NON-streaming mode for reasoning pattern filtering";
     }
+
+	# Clip system content metadata, like:
+	# ==== z (think|opt showthought)
+	# ...rest of file...
+	$system_content = $self->_clip_system_content($system_content);
 
     # Initialize context manager if needed
     $self->{context_mgr} //= ZChat::ContextManager->new(

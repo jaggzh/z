@@ -1,0 +1,360 @@
+#!/usr/bin/perl
+BEGIN { if (grep {/--debug/} @ARGV) { my @ARGS=grep {!/--debug/} @ARGV; exec($^X, "-d", __FILE__, @ARGS); } }
+
+use v5.36;
+
+# Usage:
+#   prog | zchunk -q "Query" [opts] [-- z-opts...]
+#   zchunk -q "Query" [opts] file.txt [-- z-opts...]
+#
+# Splits input into LLM-context-sized chunks and runs 'z' on each with the
+# given query. The query is placed before and after each chunk (Microsoft
+# research suggests this improves LLM attention for long documents).
+#
+# '--' separates zchunk's own options from any extra options to pass
+# directly to 'z' for the chunk queries (not for --ctx or -T calls).
+
+use bansi;
+use Encode       qw(encode decode FB_QUIET);
+use File::Slurper qw(read_text write_text);
+use Getopt::Long::Descriptive;
+use String::ShellQuote qw(shell_quote);
+use JSON::XS;
+use IPC::Open3;
+use IO::Select;
+use Fcntl;
+use Symbol       qw(gensym);
+use POSIX        ':sys_wait_h';
+use List::Util   qw(min max);
+use utf8;
+no warnings 'once';
+
+binmode(STDOUT, ':encoding(utf8)');
+binmode(STDERR, ':encoding(utf8)');
+select STDERR; $|=1;
+select STDOUT; $|=1;
+
+my $bin_llm      = 'z';
+my $safety_frac  = 0.98;
+my $def_overlap  = 0;
+my $def_predict_room = 1024;
+# $cn = current chunk number, $cm = chunk count (max)
+my $def_sepfmt   = '\n--- Chunk $cn / $cm ---\n';
+
+# Split priorities per preset.
+# These are matched against individual token pieces from the tokenizer.
+my %eos_pieces = (
+	en   => ['.', '!', '?', ".\n", "!\n", "?\n"],
+	code => ["}\n", ";\n", "\n\n", "\n"],
+	md   => ["\n\n", ".\n", "!\n", "?\n"],
+);
+my %fallback_pieces = (
+	en   => ["\n", ' ', ':', ';', ')', ']', '}', '*'],
+	code => [';', '}', ')', ']', "\n", ' '],
+	md   => ["\n", ' '],
+);
+
+# Pre-split @ARGV on '--' before Getopt sees it.
+# Everything after '--' is passed through to 'z' during chunk queries.
+my @z_extra_opts;
+{
+	my $dd = -1;
+	for my $i (0 .. $#ARGV) { if ($ARGV[$i] eq '--') { $dd = $i; last } }
+	if ($dd >= 0) {
+		@z_extra_opts = @ARGV[$dd+1 .. $#ARGV];
+		@ARGV         = @ARGV[0 .. $dd-1];
+	}
+}
+
+# Subs declared early for use in option callbacks and throughout
+my $verbose = 0;
+sub se  { say  STDERR @_ }
+sub sel { my $l=shift; say  STDERR @_ if $verbose >= $l }
+sub pe  { print STDERR @_ }
+sub pel { my $l=shift; print STDERR @_ if $verbose >= $l }
+sub serr  { se $bgred, $whi, @_, $rst }
+sub swarn { se $yel, @_, $rst }
+
+sub help_sec($str) { "\033[44;33;1m $str $rst" }
+
+my ($opt, $usage) = describe_options(
+	'zchunk %o [file] [-- z-opts...]',
+	[ help_sec('Required:') ],
+	[ 'query|q=s'         => "Query to run on each chunk" ],
+	[],
+	[ help_sec('Input / splitting:') ],
+	[ 'preset|p=s'        => "Split preset: en|code|md (default: en)", { default => 'en' } ],
+	[ 'ln|lnums|line-numbers' => "Prepend global line numbers to content" ],
+	[ 'overlap=i'         => "Token overlap between chunks (default: $def_overlap)",
+	                         { default => $def_overlap } ],
+	[ 'n-predict-room|P=i' => "Reserve this many tokens for the model's reply (default: $def_predict_room)",
+	                         { default => $def_predict_room } ],
+	[],
+	[ help_sec('Output:') ],
+	[ 'sepfmt=s'          => "Separator format between chunks; vars: \$cn, \$cm (default: '$def_sepfmt')",
+	                         { default => $def_sepfmt } ],
+	[ 'no-double-query'   => "Don't append query after each chunk (double-query is default)" ],
+	[ 'dry-run|n'         => "Show chunks and token counts; do not query z" ],
+	[],
+	[ help_sec('General:') ],
+	[ 'verbose|v+'        => "Increase verbosity (repeat for more)", { default => 0 } ],
+	[ 'help|h'            => "Show this help", { shortcircuit => 1 } ],
+);
+
+if ($opt->help) { print $usage->text; exit 0 }
+
+$verbose = $opt->verbose;
+
+# Validate
+if (!$opt->query) {
+	print STDERR $usage->text;
+	se "${red}Error: --query / -q is required.$rst";
+	exit 1;
+}
+my $preset = $opt->preset;
+if (!exists $eos_pieces{$preset}) {
+	se "${red}Error: Unknown preset '$preset'. Choose: " . join(', ', sort keys %eos_pieces) . "$rst";
+	exit 1;
+}
+
+# Input: file arg or stdin
+my $input_file = shift @ARGV; # Whatever's left after opts (before '--')
+my $content;
+if (defined $input_file && $input_file ne '-') {
+	die "File not found: $input_file\n" if !-f $input_file;
+	$content = read_text($input_file);
+} else {
+	binmode(STDIN, ':encoding(utf8)');
+	local $/;
+	$content = <STDIN>;
+}
+
+die "No input content.\n" if ($content // '') =~ /^\s*$/;
+
+# Optionally prepend line numbers
+if ($opt->ln) {
+	my @lines = split /\n/, $content, -1;
+	my $w = length(scalar @lines);
+	$content = join("\n", map { sprintf("%*d\t%s", $w, $_+1, $lines[$_]) } 0..$#lines);
+}
+
+# -------------------------------------------------------------------------
+# LLM utilities (adapted from zweb)
+# -------------------------------------------------------------------------
+
+sub pipestr($instr, %fopts) {
+	my $cmd = delete $fopts{cmd} // die "pipestr(): Need cmd=>";
+	sel 3, "pipestr(): cmd={{$bgbro$whi$cmd$rst}}";
+	my ($outstr, $errstr) = ('', '');
+
+	local $SIG{PIPE} = 'IGNORE';
+	my $pid = open3(
+		my $inh, my $outh, (my $errh = gensym),
+		ref($cmd) eq 'ARRAY' ? @$cmd : $cmd);
+
+	binmode $inh, ':encoding(UTF-8)';
+	fcntl($outh, F_SETFL, O_NONBLOCK);
+	fcntl($errh, F_SETFL, O_NONBLOCK);
+
+	if (defined $instr) {
+		(print $inh $instr) or warn "Failed to write to process stdin: $!";
+	}
+	close $inh;
+
+	my $sel = IO::Select->new($outh, $errh);
+	while ($sel->count) {
+		for my $fh ($sel->can_read) {
+			my $bytes = sysread($fh, my $buf, 4096);
+			if ($bytes) {
+				($fh == $outh ? $outstr : $errstr) .= $buf;
+			} else {
+				$sel->remove($fh);
+				close $fh;
+			}
+		}
+	}
+	waitpid($pid, 0);
+	my $status = $? >> 8;
+	my $out = decode('UTF-8', $outstr, FB_QUIET);
+	my $err = decode('UTF-8', $errstr, FB_QUIET);
+	if ($status) {
+		sel 1, "${bgred}${yel}pipestr(): command exited $status$rst";
+		sel 1, "  cmd: $cmd";
+		sel 1, "  stderr: $err" if $err;
+	}
+	return ($out, $err, $status);
+}
+
+sub get_ctx_max {
+	my $cmd = shell_quote($bin_llm, '--ctx');
+	my ($out, $err, $exit) = pipestr(undef, cmd => $cmd);
+	die "get_ctx_max() failed (exit $exit): $err\n" if $exit;
+	$out =~ s/\s+$//;
+	die "get_ctx_max(): non-numeric result: {$out}\n" if $out =~ /\D/;
+	$out;
+}
+
+sub get_token_cnt {
+	my $s = shift;
+	my $cmd = shell_quote($bin_llm, '-T', '-');
+	my ($out, $err, $exit) = pipestr($s, cmd => $cmd);
+	die "get_token_cnt() failed (exit $exit): $err\n" if $exit;
+	$out =~ s/\s+$//;
+	die "get_token_cnt(): non-numeric result: {$out}\n" if $out =~ /\D/;
+	$out;
+}
+
+sub get_tokens {
+	my $s = shift;
+	my $cmd = shell_quote($bin_llm, '--tokens-full', '-');
+	my ($out, $err, $exit) = pipestr($s, cmd => $cmd);
+	die "get_tokens() failed (exit $exit): $err\n" if $exit;
+	my $tokens = eval { decode_json($out) };
+	die "get_tokens(): JSON parse error: $@\n" if $@;
+	for my $tok (@$tokens) {
+		if (ref($tok->{piece}) eq 'ARRAY') {
+			$tok->{piece} = encode('UTF-8', pack('C*', @{$tok->{piece}}));
+		}
+	}
+	return $tokens;
+}
+
+# content_split: lifted from zweb, unchanged in logic.
+# Splits $str into chunks of at most $max_tokens, trying to break at
+# @eos_pieces first, then @fallback_pieces, then hard-cutting.
+sub content_split {
+	my %fopts = @_;
+	my $content         = $fopts{str}             // die "content_split(): Missing str=>";
+	my $max_tokens      = $fopts{max_tokens}      // die "content_split(): Missing max_tokens=>";
+	my $overlap_tokens  = $fopts{overlap_tokens}  // die "content_split(): Missing overlap_tokens=>";
+	my $min_tokens      = $fopts{min_tokens}      // die "content_split(): Missing min_tokens=>";
+	my @eos             = @{ $fopts{eos_pieces}      // [] };
+	my @fallback        = @{ $fopts{fallback_pieces} // [] };
+
+	my $tokens_json = get_tokens($content);
+	my @tokens = map { $_->{piece} } @$tokens_json;
+	sel 2, "content_split(): " . scalar(@tokens) . " total tokens, max_tokens=$max_tokens, overlap=$overlap_tokens";
+
+	my @chunks;
+	my $start_idx = 0;
+	while ($start_idx < @tokens) {
+		my $end_idx = $start_idx + $max_tokens - 1;
+		if ($end_idx > $#tokens) {
+			push @chunks, join('', @tokens[$start_idx .. $#tokens]);
+			last;
+		}
+
+		my $best_end_idx = $end_idx;
+		for my $piece (@eos) {
+			for (my $i = $end_idx; $i >= $start_idx; $i--) {
+				if ($tokens[$i] eq $piece) { $best_end_idx = $i; last }
+			}
+			last if $best_end_idx != $end_idx;
+		}
+
+		if ($best_end_idx - $start_idx + 1 < $min_tokens) {
+			for my $piece (@fallback) {
+				for (my $i = $end_idx; $i >= $start_idx; $i--) {
+					if ($tokens[$i] eq $piece) { $best_end_idx = $i; last }
+				}
+				last if $best_end_idx - $start_idx + 1 >= $min_tokens;
+			}
+		}
+
+		# Hard cut if still too small
+		$best_end_idx = $end_idx if $best_end_idx - $start_idx + 1 < $min_tokens;
+
+		push @chunks, join('', @tokens[$start_idx .. $best_end_idx]);
+		$start_idx = $best_end_idx + 1 - $overlap_tokens;
+		$start_idx = 0 if $start_idx < 0;
+	}
+	return @chunks;
+}
+
+# -------------------------------------------------------------------------
+# Main logic
+# -------------------------------------------------------------------------
+
+my $query = $opt->query;
+
+# Get context window and query token cost
+se "${cya}Getting context size...$rst" if $verbose;
+my $ctx = get_ctx_max();
+sel 1, "Context size: $ctx tokens";
+
+my $query_toks = get_token_cnt($query);
+sel 1, "Query tokens: $query_toks";
+
+# Budget: ctx * safety - query overhead (query appears twice unless --no-double-query)
+# - reserved room for model output (--n-predict-room / -P)
+# +4 for the "\n\n" separators between query and chunk (conservative)
+my $query_overhead = $opt->no_double_query
+	? $query_toks + 2
+	: $query_toks * 2 + 4;
+my $predict_room   = $opt->n_predict_room;
+my $max_chunk_toks = int($ctx * $safety_frac) - $query_overhead - $predict_room;
+my $overlap        = $opt->overlap;
+my $min_chunk_toks = max(20, int($max_chunk_toks * 0.60));
+
+sel 1, "Chunk budget: $max_chunk_toks tokens (overlap: $overlap, min: $min_chunk_toks, predict-room: $predict_room)";
+
+die "Query/settings are too large to leave room for any content (ctx=$ctx, overhead=$query_overhead, predict_room=$predict_room)\n"
+	if $max_chunk_toks <= 0;
+
+# Split
+se "${cya}Splitting content...$rst" if $verbose;
+my @chunks = content_split(
+	str             => $content,
+	max_tokens      => $max_chunk_toks,
+	overlap_tokens  => $overlap,
+	min_tokens      => $min_chunk_toks,
+	eos_pieces      => $eos_pieces{$preset},
+	fallback_pieces => $fallback_pieces{$preset},
+);
+
+my $cm = scalar @chunks;
+se "${gre}Split into $cm chunk(s).$rst" if $verbose || $cm > 1;
+
+# Dry run: just show chunks and exit
+if ($opt->dry_run) {
+	for my $cn (1 .. $cm) {
+		my $chunk = $chunks[$cn-1];
+		my $toks  = get_token_cnt($chunk);
+		say "--- Chunk $cn / $cm ($toks tokens) ---";
+		print $chunk;
+		print "\n" if $chunk !~ /\n$/;
+	}
+	exit 0;
+}
+
+# Query z on each chunk
+my @z_base_cmd = ($bin_llm, '-', '-H');  # -H: no chat history per chunk
+push @z_base_cmd, @z_extra_opts;        # user's pass-through z opts
+my $z_cmd = shell_quote(@z_base_cmd);
+sel 1, "z command: $z_cmd";
+
+for my $cn (1 .. $cm) {
+	my $chunk = $chunks[$cn-1];
+
+	# Separator (only when there's more than one chunk, or user set --sepfmt explicitly)
+	if ($cm > 1) {
+		my $sep = do { eval qq{"${\$opt->sepfmt}"} };
+		pe $sep;
+	}
+
+	# Build prompt: query before chunk, and after (unless --no-double-query)
+	my $prompt = $opt->no_double_query
+		? "$query\n\n$chunk\n"
+		: "$query\n\n$chunk\n\n$query\n";
+
+	sel 2, "Chunk $cn/$cm prompt length: " . length($prompt) . " chars";
+
+	$DB::single=1;
+	my ($out, $err, $exit) = pipestr($prompt, cmd => $z_cmd);
+	if ($exit) {
+		serr "z exited with error on chunk $cn: $exit";
+		se "stderr: $err" if $err;
+	}
+	chomp $out;
+	say $out;
+}

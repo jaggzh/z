@@ -192,7 +192,11 @@ sub get_model_context_size {
     $model_name //= 'unknown';
     $model_key  //= 'unknown';
 
-    my $cache_key = "ctx_$model_name";
+    # Cache key includes api_url so different servers never share a ctx entry.
+    # (Keying by model name alone caused stale hits when --apiurl pointed at a
+    # different server that happened to serve the same model name.)
+    my $api_url_key = $self->{core}{api_url} // q{};
+    my $cache_key = "ctx_${api_url_key}_${model_name}";
 
     # Check for forced max_ctx
     if (my $forced = $self->{models}{$model_key}{max_ctx}) {
@@ -218,11 +222,22 @@ sub get_model_context_size {
         }
     }
 
-    # Fetch fresh - but model_info may already be loaded if we got model_name above
+    # Fetch fresh from server.
+    # If get_n_ctx throws (dead server, connection refused, etc.) we let the
+    # exception propagate rather than silently returning stale cache data.
+    # Callers that want graceful degradation should catch this themselves.
     sel(2, "Fetching fresh n_ctx from server for $model_name");
-    my $n_ctx = $self->{core}->get_n_ctx($force_refresh);
+    my $n_ctx = eval { $self->{core}->get_n_ctx($force_refresh) };
+    if ($@) {
+        # Server unreachable. Do NOT fall back to stale cache - that is what
+        # caused the original bug (wrong ctx returned for a dead / different
+        # server whose model_name happened to match a cached entry).
+        # Re-throw so callers know the server is down.
+        die "ContextManager: could not fetch n_ctx from server "
+            . "($api_url_key): $@";
+    }
 
-    # Cache it
+    # Cache the freshly fetched value
     $self->{cache}{$cache_key} = {
         n_ctx => $n_ctx,
         timestamp => time,

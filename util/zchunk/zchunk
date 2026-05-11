@@ -74,6 +74,7 @@ sub pe  { print STDERR @_ }
 sub pel { my $l=shift; print STDERR @_ if $verbose >= $l }
 sub serr  { se $bgred, $whi, @_, $rst }
 sub swarn { se $yel, @_, $rst }
+sub scmd($lbl,@cmd) { se a24bg(0,10,70), "${bcya}CMD[$lbl]: $rst$whi", @cmd, $rst }
 
 sub help_sec($str) { "\033[44;33;1m $str $rst" }
 
@@ -98,6 +99,7 @@ my ($opt, $usage) = describe_options(
 	[],
 	[ help_sec('General:') ],
 	[ 'verbose|v+'        => "Increase verbosity (repeat for more)", { default => 0 } ],
+	[ 'zv+'               => "Increase 'z' verbosity (can also add as extra opts passed to z, like: -- -v", { default => 0 } ],
 	[ 'help|h'            => "Show this help", { shortcircuit => 1 } ],
 );
 
@@ -187,6 +189,7 @@ sub pipestr($instr, %fopts) {
 
 sub get_ctx_max {
 	my $cmd = shell_quote($bin_llm, '--ctx');
+	scmd("get_ctx_max", $cmd);
 	my ($out, $err, $exit) = pipestr(undef, cmd => $cmd);
 	die "get_ctx_max() failed (exit $exit): $err\n" if $exit;
 	$out =~ s/\s+$//;
@@ -197,6 +200,7 @@ sub get_ctx_max {
 sub get_token_cnt {
 	my $s = shift;
 	my $cmd = shell_quote($bin_llm, '-T', '-');
+	scmd("get_token_cnt", $cmd);
 	my ($out, $err, $exit) = pipestr($s, cmd => $cmd);
 	die "get_token_cnt() failed (exit $exit): $err\n" if $exit;
 	$out =~ s/\s+$//;
@@ -328,7 +332,7 @@ if ($opt->dry_run) {
 }
 
 # Query z on each chunk
-my @z_base_cmd = ($bin_llm, '-', '-H');  # -H: no chat history per chunk
+my @z_base_cmd = ($bin_llm, '-', '-H', ('-v') x $opt->zv);  # -H: no chat history per chunk
 push @z_base_cmd, @z_extra_opts;        # user's pass-through z opts
 my $z_cmd = shell_quote(@z_base_cmd);
 sel 1, "z command: $z_cmd";

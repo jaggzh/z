@@ -746,7 +746,15 @@ sub _apply_thought_filter {
     return $text unless defined $pattern;
 
     my $original_length = length($text);
+
+	# swarn "REMOVE ME. the code showing the stripping of thought and code"; #r
+    # my $ot = $text; #r
+
     $text =~ s/$pattern//gs;
+    # say "OT: {{$bmag$ot$rst}}";  #r
+    # say "NT: {{$yel$text$rst}}"; #r
+    # $DB::single=1; #r
+
     my $filtered_length = length($text);
 
     if ($original_length != $filtered_length) {
@@ -821,6 +829,7 @@ sub query($self, $user_text, $optshro=undef) {
     if (!$should_stream && $self->_should_filter_thoughts()) {
         sel 2, "Forcing NON-streaming mode for reasoning pattern filtering";
     }
+    # se "STREAM: $should_stream";
 
 	# Clip system content metadata, like:
 	# ==== z (think|opt showthought)

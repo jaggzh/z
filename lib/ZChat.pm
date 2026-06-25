@@ -526,12 +526,19 @@ sub _get_system_content {
 
 sub _clip_system_content {
 	my ($self, $system_content) = @_;
+
+    return undef if ! defined $system_content;
     # Remove === z metadata sections
-    if ($system_content =~ s/(^==+\s*z\s+.*)$//sm) { 
+	my $ss = $system_content;
+    if ($system_content =~ s/(^==+\s*z\s+.*)\z//ms) { 
     	my $trimmed = $1;
         sokl 2, "Trimmed System content == z metadata";
         sel 3, "Trimmed material: {{$trimmed}}";
 	}
+	print "\n" x 100;
+	print "$yel$ss$rst";
+	print "$bmag$system_content$rst";
+	$DB::single=1;
     
     # ? Trim trailing whitespace? No, == z marks end
     # if ($content =~ s/\s+$/\n/g) { }
@@ -902,6 +909,7 @@ sub query($self, $user_text, $optshro=undef) {
                 fallbacks_ok      => $self->{_fallbacks_ok},
                 append_tool_calls => $optshro->{append_tool_calls},
                 media_items       => \@media_items,
+                dry_run           => $optshro->{dry_run},
             });
             $response_text     = ref($result) eq 'HASH' ? $result->{content}            : $result;
             $response_metadata = ref($result) eq 'HASH' ? ($result->{metadata} || {})   : {};
@@ -910,6 +918,7 @@ sub query($self, $user_text, $optshro=undef) {
                 stream            => 0,
                 fallbacks_ok      => $self->{_fallbacks_ok},
                 append_tool_calls => $optshro->{append_tool_calls},
+                dry_run           => $optshro->{dry_run},
             });
             if (ref($result) eq 'HASH') {
                 $response_text     = $result->{content};
@@ -951,28 +960,30 @@ sub query($self, $user_text, $optshro=undef) {
         print $print_fh "\n";
     }
 
-    # Store in history with metadata
-    if (defined $user_text && $user_text ne '') {
-        my $user_meta = {
-            request_time => $response_metadata->{request_time} || time,
-        };
-        $user_meta->{media_ids} = $optshro->{media_ids} if $optshro->{media_ids};
+    # Store in history with metadata (skipped on dry-run)
+    unless ($response_metadata->{dry_run}) {
+        if (defined $user_text && $user_text ne '') {
+            my $user_meta = {
+                request_time => $response_metadata->{request_time} || time,
+            };
+            $user_meta->{media_ids} = $optshro->{media_ids} if $optshro->{media_ids};
 
-        $self->{history}->append('user', $user_text, $user_meta);
-    }
-
-    # Store tool results in history if provided
-    if ($optshro->{tool_results}) {
-        for my $tool_result (@{$optshro->{tool_results}}) {
-            my $meta = { tool_name => $tool_result->{name} };
-            $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
-
-            $self->{history}->append('tool', $tool_result->{data}, $meta);
+            $self->{history}->append('user', $user_text, $user_meta);
         }
-    }
 
-    $self->{history}->append('assistant', $response_text, $response_metadata);
-    $self->{history}->save();
+        # Store tool results in history if provided
+        if ($optshro->{tool_results}) {
+            for my $tool_result (@{$optshro->{tool_results}}) {
+                my $meta = { tool_name => $tool_result->{name} };
+                $meta->{tool_call_id} = $tool_result->{id} if defined $tool_result->{id};
+
+                $self->{history}->append('tool', $tool_result->{data}, $meta);
+            }
+        }
+
+        $self->{history}->append('assistant', $response_text, $response_metadata);
+        $self->{history}->save();
+    }
 
     if ($response_metadata->{tokens_total}) {
         my $total_input_text = join("\n", map { $_->{content} } @messages);

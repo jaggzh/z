@@ -86,6 +86,7 @@ my ($opt, $usage) = describe_options(
                                 { implies=>'help' } ],
     [ 'verbose|v+',         "Increase verbosity", { default => 0 } ],
     [ 'verbose-resp|vr+',   "Verbose response data" ],
+    [ 'dry-run|N',          "Dry-run: Preview assembled query w/o hitting the model/completion endpoint." ],
     [ 'quiet|q',            "Quiet unimportant warnings (right now the warning of no-query)" ],
     [ 'interactive|int|i',  "Interactive mode (query on CLI can be included as first message)" ],
     [ 'echo1|e',            "Echo back initial prompt" ],
@@ -95,7 +96,7 @@ my ($opt, $usage) = describe_options(
     [ 'token-count|T',      "Count tokens in input text" ],
     [ 'ctx',                "Get running model n_ctx (use --update to refresh cache)" ],
     [ 'ctx-info',           "Get running model context - Detailed (use --update to refresh cache)" ],
-    [ 'metadata',           "Get running model metadata (use --update to refresh cache)" ],
+    [ 'metadata|meta',      "Get running model metadata (use --update to refresh cache)" ],
     [ 'update',             "Force update/refresh (use with --ctx, etc.)" ],
     [ 'backend=s',          "Use with --max-ctx and possibly other URL/API selection features" ],
     [ 'apiurl=s',           "API URL (overrides environment)" ],
@@ -190,7 +191,7 @@ my ($opt, $usage) = describe_options(
     [ 'pins-sum',           "List pinned messages (one-line summary)" ],
     [ 'pins-cnt',           "Output total count of all pins of all pin types" ],
     [ 'pin-sum-len=i',      "Max length for pin summary lines" ],
-    [ 'pin-write=s',        "Overwrite pin by index: --pin-write '0=new content'" ],
+    [ 'pin-write=s@',       "Overwrite pin by index: --pin-write '0=new content' --pin-write '3=also new'" ],
     [ 'pins-clear',         "Clear all pinned messages" ],
     [ 'pin-rm=i@',          "Remove pin(s) by index" ],
     [ 'pins-sys-max=i',     "Max system pins", { default => $def_pin_max } ],
@@ -230,8 +231,8 @@ my ($opt, $usage) = describe_options(
     [ help_sec('Tools (new, experimental):') ],
     [ 'tool-result=s@',     "Post tool result: --tool-result 'name:data' or '[id]name:data'" ],
     [ 'append-tool-calls',  "Append structured tool calls to assistant content as TOOL_CALL lines" ],
-    [ 'no-complete|append-user',  "Append user message to history (specify query like normal)." ],
-    [ 'append-ast=s',       "Append assistant message to history (specify query as the string arg to this option).",
+    [ 'no-complete|append-user',  "Append user message to history (no endpoint completion). (Specify query like normal). Use with --append-ast to inject a full exchange." ],
+    [ 'append-ast=s',       "Append assistant message to history (string arg). Does not hit model. Implies --no-complete. Use with a query to inject a full user+assistant exchange.",
                                 { implies => 'no_complete' } ],
     [],
     [ help_sec('Help:') ],
@@ -356,7 +357,7 @@ if ($opt->tool_result && scalar(@{$opt->tool_result})) {
 
     # Warn about potential role alternation issues if no assistant response provided
     if (!$opt->append_ast && !$opt->no_complete) {
-        swarnl 2, "Tool result appended without --append-ast; potential role alternation issue";
+        swarnl 2, "Tool result appended without an assistant response (eg. using --append-ast); potential role alternation issue";
     }
 }
 my $has_tool_results = $tool_results && scalar(@$tool_results);
@@ -1281,13 +1282,14 @@ if (defined $uprompt && length $uprompt) {
 
     if (!$opt->no_complete) {
         my $query_opts = { stream => 1 };
+        $query_opts->{dry_run}          = 1 if $opt->dry_run;
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results if $tool_results;
         $query_opts->{media_ids} = \@media_ids if @media_ids;
         my $response = eval { $zchat->query($uprompt, $query_opts) };
         _handle_zchat_error($@) if $@;
 
-        if ($opt->play_resp) {
+        if ($opt->play_resp && !$opt->dry_run && $response) {
             eval { tts_str($response) };
             warn "Audio error: $@" if $@;
         }
@@ -1295,12 +1297,13 @@ if (defined $uprompt && length $uprompt) {
 } elsif ($has_tool_results) {
     if (!$opt->no_complete) {
         my $query_opts = { stream => 1 };
+        $query_opts->{dry_run}          = 1 if $opt->dry_run;
         $query_opts->{append_tool_calls} = 1 if $opt->append_tool_calls;
         $query_opts->{tool_results} = $tool_results;
         my $response = eval { $zchat->query(undef, $query_opts) };
         _handle_zchat_error($@) if $@;
 
-        if ($opt->play_resp) {
+        if ($opt->play_resp && !$opt->dry_run && $response) {
             eval { tts_str($response) };
             warn "Audio error: $@" if $@;
         }

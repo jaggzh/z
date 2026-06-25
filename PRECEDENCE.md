@@ -207,7 +207,7 @@ session: "work/main"
 
 **Environment**: `ZCHAT_SESSION=testing/feature`
 
-**Shell session**: 
+**Shell session**:
 ```yaml
 session: "work/urgent"
 system_file: "prompts/urgent.md"
@@ -333,7 +333,7 @@ z -n hotfix/auth-bug --store-pproc
 z --system-str "Focus on authentication issues" --sp
 z "Analyze login failures"
 
-# Terminal 2: Working on feature development  
+# Terminal 2: Working on feature development
 z -n feature/api-v2 --store-pproc
 z --system-str "Focus on API design best practices" --sp
 z "Design new endpoint structure"
@@ -344,7 +344,7 @@ z "Design new endpoint structure"
 ### Process Uniqueness
 
 Shell session files use a session identifier based on:
-- **SID**: Session ID (terminal session)  
+- **SID**: Session ID (terminal session)
 - **Session leader info**: Process details for uniqueness
 
 This ensures uniqueness even across system reboots and PID recycling.
@@ -404,7 +404,7 @@ z -- "This is my query"   # Now uses session/frontend's prompt (unless overridde
 2. **User global**: Personal preferences should generally apply
 3. **Environment variable**: Script-friendly override without persistence
 4. **Shell session**: Terminal-scoped convenience without global impact
-5. **Session specific**: Project/context needs override personal preferences  
+5. **Session specific**: Project/context needs override personal preferences
 6. **CLI runtime**: Immediate need overrides everything, but temporarily
 
 ### Why Shell Session Storage for System Prompts?

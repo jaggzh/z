@@ -43,7 +43,7 @@ use constant {
     DEFAULT_TOP_P => 0.9,
     DEFAULT_MIN_P => 0.08,
 
-	DEFAULT_SYSTEM_STRING => 'You are a helpful AI assistant.',
+	DEFAULT_SYSTEM_STRING => 'You are a helpful, comprehensive, and concise AI assistant.',
 };
 
 1;

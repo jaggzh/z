@@ -12,7 +12,7 @@ use File::Path qw(make_path);
 use ZChat::ParentID qw(get_parent_id);
 use ZChat::Utils ':all';
 use ZChat::ansi;
-use ZChat::Defaults;
+use ZChat::Defaults qw(DEFAULT_SYSTEM_STRING);
 
 sub new {
     my ($class, %opts) = @_;
@@ -156,7 +156,7 @@ sub get_session_name($self) {
 sub _get_system_defaults {
     return {
         session => '',
-        system_string => $Defaults::DEFAULT_SYSTEM_STRING,
+        system_string => DEFAULT_SYSTEM_STRING,
         pin_defaults => {
             role => 'system',
             method => 'concat',
@@ -185,8 +185,8 @@ sub _get_system_defaults {
         pin_tpl_user => undef,
         pin_tpl_ast => undef,
         pin_mode_sys => 'concat',    # vars|concat  (vars = opt-out: place $pins_str yourself)
-        pin_mode_user => 'vars',     # vars|varsfirst|concat
-        pin_mode_ast => 'vars',      # vars|varsfirst|concat
+        pin_mode_user => 'msg',     # vars|varsfirst|concat
+        pin_mode_ast => 'msg',      # vars|varsfirst|concat
     };
 }
 
@@ -705,6 +705,18 @@ sub _build_system_prompt_precedence {
         $active_found = 1;
     }
 
+    # System default (always shown; active only if nothing higher won)
+    unless ($active_found) {
+        my $default_str = $self->_get_system_defaults()->{system_string};
+        push @chain, {
+            source   => 'SYSTEM',
+            type     => 'system_string',
+            value    => $default_str // '',
+            active   => 1,
+            location => 'system defaults',
+        };
+    }
+
     return \@chain;
 }
 
@@ -810,7 +822,10 @@ sub _build_sources_view {
 
     # System defaults
     my $defaults = $self->_get_system_defaults();
-    $sources->{SYSTEM} = { session => $defaults->{session} };
+    $sources->{SYSTEM} = {
+        session       => $defaults->{session},
+        system_string => $defaults->{system_string},
+    };
 
     return $sources;
 }

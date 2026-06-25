@@ -11,6 +11,7 @@ use JSON::XS;
 use LWP::UserAgent;
 use HTTP::Request;
 use Encode qw(decode encode_utf8);
+use Encode;
 use URI;
 use URI::Escape qw(uri_escape);
 
@@ -160,6 +161,12 @@ sub complete_request($self, $messages, $optshro=undef) {
 
     sel(3, "API request data: " . dumps($data));
 
+    if ($optshro->{dry_run}) {
+        say STDOUT "--- DRY RUN: request data (not sent) ---";
+        say STDOUT dumps($data);
+        return { content => '', metadata => { dry_run => 1 } };
+    }
+
     if ($stream) {
         return $self->_stream_completion($data, $model_name, $optshro);
     } else {
@@ -185,9 +192,12 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
     my $buffer = '';
     my $usage_info = {};
     my @collected_tool_calls;
+    my $content_buf = '';
+	my $utf8_single_byte_handling = 1;
 
     $tx->res->content->unsubscribe('read')->on(read => sub {
         my ($content, $bytes) = @_;
+
         $buffer .= $bytes;
 
         # Process complete lines
@@ -225,20 +235,72 @@ sub _stream_completion($self, $data, $model_name, $optshro=undef) {
                 last if $choice->{finish_reason};
 
                 # Extract content from delta
-                if (defined $choice->{delta} && defined $choice->{delta}{content}) {
-                    my $chunk = $choice->{delta}{content};
+                # Handle single-byte utf8 sequences which must be buffered and joined.
+				if ($utf8_single_byte_handling) {
+					if (defined $choice->{delta} && defined $choice->{delta}{content}) {
+						my $chunk = $choice->{delta}{content};
+						$chunk =~ s/^\s+// unless $token_count;
+						$token_count++;
 
-                    # Clean up first token
-                    $chunk =~ s/^\s+// unless $token_count;
+						# llama.cpp streams some Arabic as individual bytes per SSE event.
+						# JSON::XS gets incomplete UTF-8 and falls back to Latin-1 per byte
+						# (e.g. raw byte 0xD8 → U+00D8). We detect by codepoint range:
+						# correctly-decoded Unicode (Arabic U+0600+) has codepoints > U+00FF;
+						# Latin-1 byte-fallback chars have codepoints <= U+00FF.
+						my $new_bytes;
+						if (utf8::is_utf8($chunk)) {
+							if ($chunk =~ /[^\x00-\xFF]/) {
+								# Real Unicode (Arabic, etc.) — encode as UTF-8 bytes
+								$new_bytes = Encode::encode('UTF-8', $chunk);
+							} else {
+								# Latin-1 fallback for raw bytes — recover original byte values
+								$new_bytes = Encode::encode('latin-1', $chunk);
+							}
+						} else {
+							$new_bytes = $chunk;  # already raw bytes
+						}
 
-                    # Send chunk to callback if provided
-                    if ($on_chunk && $chunk ne '') {
-                        $on_chunk->($chunk);
-                    }
+						# Accumulate bytes; emit only complete UTF-8 codepoints
+						$content_buf .= $new_bytes;
+						EMIT: while (length $content_buf) {
+							my $b = ord substr($content_buf, 0, 1);
+							my $need = $b < 0x80 ? 1
+									 : $b < 0xC0 ? do { substr($content_buf, 0, 1, ''); next EMIT }
+									 : $b < 0xE0 ? 2
+									 : $b < 0xF0 ? 3 : 4;
+							last if length($content_buf) < $need;
+							my $ch = Encode::decode('UTF-8', substr($content_buf, 0, $need, ''),
+													Encode::FB_DEFAULT);
+							$answer .= $ch;
+							$on_chunk->($ch) if $on_chunk && length $ch;
+						}
+						next;  # skip the old on_chunk/print below
+					}
+				} else {
+					# Old method NOT handling separated utf8 bytes
+					if (defined $choice->{delta} && defined $choice->{delta}{content}) {
+						my $chunk = $choice->{delta}{content};
 
-                    $answer .= $chunk;
-                    $token_count++;
-                }
+						# utf8 debug
+						warn sprintf "[DBG] chunk utf8_flag=%s  hex=%s  str=>>>%s<<<\n",
+							(utf8::is_utf8($chunk) ? 'YES' : 'no'),
+							join(' ', map { sprintf '%02x', ord($_) } split(//, $chunk)),
+							$chunk;
+
+
+
+						# Clean up first token
+						$chunk =~ s/^\s+// unless $token_count;
+
+						# Send chunk to callback if provided
+						if ($on_chunk && $chunk ne '') {
+							$on_chunk->($chunk);
+						}
+
+						$answer .= $chunk;
+						$token_count++;
+					}
+				}
             }
         }
     });

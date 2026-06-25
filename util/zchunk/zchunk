@@ -15,8 +15,7 @@ use v5.36;
 # directly to 'z' for the chunk queries (not for --ctx or -T calls).
 
 use bansi;
-use Encode       qw(encode decode FB_QUIET);
-use File::Slurper qw(read_text write_text);
+use Encode       qw(encode decode FB_DEFAULT);
 use Getopt::Long::Descriptive;
 use String::ShellQuote qw(shell_quote);
 use JSON::XS;
@@ -84,7 +83,7 @@ my ($opt, $usage) = describe_options(
 	[ 'query|q=s'         => "Query to run on each chunk" ],
 	[],
 	[ help_sec('Input / splitting:') ],
-	[ 'preset|p=s'        => "Split preset: en|code|md (default: en)", { default => 'en' } ],
+	[ 'preset|p=s'        => "Split method / preset: en|code|md (default: en)", { default => 'en' } ],
 	[ 'ln|lnums|line-numbers' => "Prepend global line numbers to content" ],
 	[ 'overlap=i'         => "Token overlap between chunks (default: $def_overlap)",
 	                         { default => $def_overlap } ],
@@ -92,9 +91,9 @@ my ($opt, $usage) = describe_options(
 	                         { default => $def_predict_room } ],
 	[],
 	[ help_sec('Output:') ],
-	[ 'sepfmt=s'          => "Separator format between chunks; vars: \$cn, \$cm (default: '$def_sepfmt')",
+	[ 'sepfmt=s'          => "Separator format between output chunks; vars: \$cn, \$cm (default: '$def_sepfmt')",
 	                         { default => $def_sepfmt } ],
-	[ 'no-double-query'   => "Don't append query after each chunk (double-query is default)" ],
+	[ 'no-double-query'   => "Don't append query after each chunk (double-query is default). (From a Google publication, with an instruction repeated before and after large prompts is more-reliably honored." ],
 	[ 'dry-run|n'         => "Show chunks and token counts; do not query z" ],
 	[],
 	[ help_sec('General:') ],
@@ -119,16 +118,26 @@ if (!exists $eos_pieces{$preset}) {
 	exit 1;
 }
 
-# Input: file arg or stdin
+# Input: file arg or stdin.
+# Read bytes first, then decode with replacement so malformed UTF-8 cannot
+# create Perl's non-Unicode extended code points or abort later encodes.
 my $input_file = shift @ARGV; # Whatever's left after opts (before '--')
 my $content;
-if (defined $input_file && $input_file ne '-') {
-	die "File not found: $input_file\n" if !-f $input_file;
-	$content = read_text($input_file);
-} else {
-	binmode(STDIN, ':encoding(utf8)');
-	local $/;
-	$content = <STDIN>;
+{
+	my $bytes;
+	if (defined $input_file && $input_file ne '-') {
+		die "File not found: $input_file\n" if !-f $input_file;
+		open my $fh, '<:raw', $input_file
+			or die "Cannot open $input_file: $!\n";
+		local $/;
+		$bytes = <$fh>;
+		close $fh or warn "Failed to close $input_file: $!\n";
+	} else {
+		binmode(STDIN, ':raw');
+		local $/;
+		$bytes = <STDIN>;
+	}
+	$content = decode('UTF-8', $bytes // '', FB_DEFAULT);
 }
 
 die "No input content.\n" if ($content // '') =~ /^\s*$/;
@@ -154,12 +163,15 @@ sub pipestr($instr, %fopts) {
 		my $inh, my $outh, (my $errh = gensym),
 		ref($cmd) eq 'ARRAY' ? @$cmd : $cmd);
 
-	binmode $inh, ':encoding(UTF-8)';
+	binmode $inh, ':raw';
 	fcntl($outh, F_SETFL, O_NONBLOCK);
 	fcntl($errh, F_SETFL, O_NONBLOCK);
 
 	if (defined $instr) {
-		(print $inh $instr) or warn "Failed to write to process stdin: $!";
+		# FB_DEFAULT replaces any impossible/non-Unicode character instead of
+		# dying with: "does not map to UTF-8".
+		my $bytes = encode('UTF-8', $instr, FB_DEFAULT);
+		(print {$inh} $bytes) or warn "Failed to write to process stdin: $!";
 	}
 	close $inh;
 
@@ -177,8 +189,8 @@ sub pipestr($instr, %fopts) {
 	}
 	waitpid($pid, 0);
 	my $status = $? >> 8;
-	my $out = decode('UTF-8', $outstr, FB_QUIET);
-	my $err = decode('UTF-8', $errstr, FB_QUIET);
+	my $out = decode('UTF-8', $outstr, FB_DEFAULT);
+	my $err = decode('UTF-8', $errstr, FB_DEFAULT);
 	if ($status) {
 		sel 1, "${bgred}${yel}pipestr(): command exited $status$rst";
 		sel 1, "  cmd: $cmd";
@@ -332,7 +344,19 @@ if ($opt->dry_run) {
 }
 
 # Query z on each chunk
-my @z_base_cmd = ($bin_llm, '-', '-H', ('-v') x $opt->zv);  # -H: no chat history per chunk
+my $z_sys = <<'EOT';
+You are a helpful AI assistant.
+
+# Input
+You are being provided:
+1. A long document, broken up into chunks to fit within context
+2. A query from the user about the content
+
+# Output
+1. Respond appropriately to the user's query based on the chunk of text provided
+2. If no relevant content is found in a block, only output, "No relevant content".
+EOT
+my @z_base_cmd = ($bin_llm, '-', '--sstr', $z_sys, '-H', ('-v') x $opt->zv);  # -H: no chat history per chunk
 push @z_base_cmd, @z_extra_opts;        # user's pass-through z opts
 my $z_cmd = shell_quote(@z_base_cmd);
 sel 1, "z command: $z_cmd";
